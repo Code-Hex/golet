@@ -12,6 +12,7 @@ import (
 
 	"github.com/Code-Hex/golet/internal/port"
 	colorable "github.com/mattn/go-colorable"
+	"github.com/robfig/cron"
 )
 
 type color int
@@ -42,7 +43,7 @@ type (
 		serviceNum int
 		tags       map[string]bool
 		basePort   int
-		m          *sync.Mutex
+		cron       *cron.Cron
 	}
 
 	// Service struct to add services to golet
@@ -112,6 +113,7 @@ func New() Runner {
 		execNotice: true,
 
 		tags: map[string]bool{},
+		cron: cron.New(),
 	}
 }
 
@@ -166,7 +168,6 @@ func (p *config) Run() {
 			if err != nil {
 				panic(err)
 			}
-
 			s := service
 			sid := fmt.Sprintf("%s.%d", s.Tag, i)
 
@@ -206,6 +207,7 @@ func (p *config) Run() {
 }
 
 func (s *Service) exec() {
+	defer s.pipe.writer.Close()
 	args := append(shell, s.Exec)
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = os.Environ()
@@ -227,8 +229,7 @@ func (p *config) logging(services map[string]Service) {
 	for _, reader := range readers {
 		go func(sc *bufio.Scanner, sid string) {
 			for sc.Scan() {
-				now := time.Now()
-				hour, min, sec := now.Clock()
+				hour, min, sec := time.Now().Clock()
 				if p.color {
 					fmt.Fprintf(p.logger, "\x1b[%dm%02d:%02d:%02d %-10s |\x1b[0m %s\n",
 						services[sid].color+32,
