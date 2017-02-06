@@ -59,7 +59,7 @@ type (
 		Code   func(io.Writer) error // Routine of services.
 		Worker int                   // Number of goroutine. The maximum number of workers is 100.
 		Tag    string                // Keyword for log.
-		Every  string                // Crontab like format.
+		Every  string                // Crontab like format. See https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format
 
 		startPort int
 		color     color
@@ -105,12 +105,32 @@ func init() {
 	}
 }
 
-// for setting
+// for settings
+// SetInterval can specify the interval at which the command is executed.
 func (c *config) SetInterval(t time.Duration) { c.interval = t }
-func (c *config) EnableColor()                { c.color = true }
-func (c *config) SetLogger(f io.Writer)       { c.logger = f }
-func (c *config) DisableLogger()              { c.logWorker = false }
-func (c *config) DisableExecNotice()          { c.execNotice = false }
+
+// EnableColor can output colored log.
+func (c *config) EnableColor() { c.color = true }
+
+// SetLogger can specify the *os.File
+// for example in https://github.com/lestrrat/go-file-rotatelogs
+/*
+      logf, _ := rotatelogs.New(
+  	    "/path/to/access_log.%Y%m%d%H%M",
+  	    rotatelogs.WithLinkName("/path/to/access_log"),
+  	    rotatelogs.WithMaxAge(24 * time.Hour),
+  	    rotatelogs.WithRotationTime(time.Hour),
+      )
+
+	  golet.New(context.Background()).SetLogger(logf)
+*/
+func (c *config) SetLogger(f io.Writer) { c.logger = f }
+
+// DisableLogger is prevent to output log
+func (c *config) DisableLogger() { c.logWorker = false }
+
+// DisableExecNotice is disable execute notifications
+func (c *config) DisableExecNotice() { c.execNotice = false }
 
 // New to create struct of golet.
 func New(c context.Context) Runner {
@@ -129,6 +149,7 @@ func New(c context.Context) Runner {
 	}
 }
 
+// Env can add temporary environment variables.
 func (c *config) Env(envs map[string]string) error {
 	for k := range envs {
 		if e := os.Setenv(k, envs[k]); e != nil {
@@ -138,6 +159,7 @@ func (c *config) Env(envs map[string]string) error {
 	return nil
 }
 
+// Add can add runnable services
 func (c *config) Add(services ...Service) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -171,6 +193,7 @@ func (c *config) Add(services ...Service) error {
 	return nil
 }
 
+// Run just like the name.
 func (c *config) Run() error {
 	services := make(map[string]Service)
 
@@ -214,9 +237,7 @@ func (c *config) Run() error {
 		if service.Code == nil && service.Exec != "" {
 			cmd := service.prepare()
 			if service.Every != "" {
-				c.cron.AddFunc(service.Every, func() {
-					run(cmd, chps)
-				})
+				c.addCmd(service, cmd, chps)
 			} else {
 				c.g.Go(func() error {
 					defer service.pipe.writer.Close()
@@ -227,9 +248,7 @@ func (c *config) Run() error {
 
 		if service.Code != nil {
 			if service.Every != "" {
-				c.cron.AddFunc(service.Every, func() {
-					service.Code(service.pipe.writer)
-				})
+				c.addTask(service)
 			} else {
 				c.g.Go(func() error {
 					defer service.pipe.writer.Close()
@@ -246,11 +265,11 @@ func (c *config) Run() error {
 		time.Sleep(c.interval)
 	}
 
-	c.cron.Start()
-
-	return c.g.Wait()
+	return c.wait()
 }
 
+// Receive process ID to be executed. or
+// It traps the signal relate to parent process. sends a signal to the received process ID.
 func (c *config) waitSignals(signals <-chan os.Signal, chps <-chan *os.Process, cap int) {
 	procs := make([]*os.Process, 0, cap)
 	for {
@@ -275,6 +294,7 @@ func (c *config) waitSignals(signals <-chan os.Signal, chps <-chan *os.Process, 
 	}
 }
 
+// Execute the command and send its process ID.
 func run(c *exec.Cmd, chps chan<- *os.Process) error {
 	if err := c.Start(); err != nil {
 		return err
@@ -283,6 +303,7 @@ func run(c *exec.Cmd, chps chan<- *os.Process) error {
 	return c.Wait()
 }
 
+// Create a command
 func (s *Service) prepare() *exec.Cmd {
 	args := append(shell, s.Exec)
 	cmd := exec.Command(args[0], args[1:]...)
@@ -291,6 +312,27 @@ func (s *Service) prepare() *exec.Cmd {
 	return cmd
 }
 
+// Add a task to execute the command to cron.
+func (c *config) addCmd(s Service, cmd *exec.Cmd, chps chan<- *os.Process) {
+	c.cron.AddFunc(s.Every, func() {
+		run(cmd, chps)
+	})
+}
+
+// Add a task to execute the code block to cron.
+func (c *config) addTask(s Service) {
+	c.cron.AddFunc(s.Every, func() {
+		s.Code(s.pipe.writer)
+	})
+}
+
+// Wait services
+func (c *config) wait() error {
+	c.cron.Start()
+	return c.g.Wait()
+}
+
+// Logging
 func (c *config) logging(sc *bufio.Scanner, sid string, clr color) {
 	for sc.Scan() {
 		hour, min, sec := time.Now().Clock()
