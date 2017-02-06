@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/Code-Hex/golet"
@@ -19,6 +20,11 @@ func main() {
 	p.EnableColor()
 	p.SetInterval(time.Second * 0)
 
+	p.Env(map[string]string{
+		"NAME":  "KEI",
+		"VALUE": "121",
+	})
+
 	p.Add(
 		golet.Service{
 			Exec: "ping google.com",
@@ -33,6 +39,7 @@ func main() {
 	p.Add(golet.Service{
 		Code: func(w io.Writer) error {
 			fmt.Fprintln(w, "Hello golet!!")
+			fmt.Println(os.Getenv("NAME"), os.Getenv("VALUE"))
 			return nil
 		},
 		Worker: 4,

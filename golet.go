@@ -79,6 +79,7 @@ type Runner interface {
 	SetLogger(io.Writer)
 	DisableLogger()
 	DisableExecNotice()
+	Env(map[string]string) error
 	Add(...Service) error
 	Run() error
 }
