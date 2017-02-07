@@ -11,14 +11,9 @@ import (
 )
 
 func main() {
-	/*
-		if err := agent.Listen(nil); err != nil {
-			log.Fatal(err)
-		}
-	*/
 	p := golet.New(context.Background())
 	p.EnableColor()
-	p.SetInterval(time.Second * 0)
+	p.SetInterval(time.Second * 1)
 
 	p.Env(map[string]string{
 		"NAME":  "KEI",
@@ -27,12 +22,13 @@ func main() {
 
 	p.Add(
 		golet.Service{
-			Exec: "ping google.com",
-			//Every: "33 * * * * *",
+			Exec: []string{"echo", "Hello!!"},
+			// Every when 30 seconds
+			Every: "30 * * * * *",
 		},
 		golet.Service{
-			Exec:   "ping ie.u-ryukyu.ac.jp",
-			Worker: 2,
+			Exec:   []string{"ping", "google.com"},
+			Worker: 4,
 		},
 	)
 
@@ -43,12 +39,7 @@ func main() {
 			return nil
 		},
 		Worker: 4,
-		Every:  "33 * * * * *",
-	})
-
-	p.Add(golet.Service{
-		Exec:   "ping gigazine.net",
-		Worker: 1,
+		Every:  "@every 10s",
 	})
 
 	p.Run()

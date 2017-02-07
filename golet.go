@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -47,6 +46,7 @@ type (
 		services   []Service
 		g          *errgroup.Group
 		ctx        context.Context
+		once       sync.Once
 		serviceNum int
 		tags       map[string]bool
 		basePort   int
@@ -55,7 +55,7 @@ type (
 
 	// Service struct to add services to golet.
 	Service struct {
-		Exec   string
+		Exec   []string
 		Code   func(io.Writer) error // Routine of services.
 		Worker int                   // Number of goroutine. The maximum number of workers is 100.
 		Tag    string                // Keyword for log.
@@ -82,27 +82,6 @@ type Runner interface {
 	Env(map[string]string) error
 	Add(...Service) error
 	Run() error
-}
-
-var (
-	shell []string
-	mu    = new(sync.Mutex)
-)
-
-func init() {
-	if runtime.GOOS == "windows" {
-		path, err := exec.LookPath("cmd")
-		if err != nil {
-			panic("Could not find `cmd` command")
-		}
-		shell = []string{path, "/c"}
-	} else {
-		path, err := exec.LookPath("bash")
-		if err != nil {
-			panic("Could not find `sh` command")
-		}
-		shell = []string{path, "-c"}
-	}
 }
 
 // for settings
@@ -161,9 +140,6 @@ func (c *config) Env(envs map[string]string) error {
 
 // Add can add runnable services
 func (c *config) Add(services ...Service) error {
-	mu.Lock()
-	defer mu.Unlock()
-
 	for _, service := range services {
 		c.serviceNum++
 
@@ -197,7 +173,7 @@ func (c *config) Add(services ...Service) error {
 func (c *config) Run() error {
 	services := make(map[string]Service)
 
-	// calculate of the number of workers
+	// Calculate of the number of workers.
 	cap := 0
 	for _, service := range c.services {
 		cap += service.Worker
@@ -205,7 +181,7 @@ func (c *config) Run() error {
 
 	order := make([]string, 0, cap)
 
-	// assignment services
+	// Assignment services.
 	for _, service := range c.services {
 		worker := service.Worker
 		for i := 1; i <= worker; i++ {
@@ -224,20 +200,20 @@ func (c *config) Run() error {
 		}
 	}
 
-	chps := make(chan *os.Process)
+	chps := make(chan *os.Process, 1)
 
-	signals := make(chan os.Signal)
+	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 
 	go c.waitSignals(signals, chps, len(order))
 
-	// invoke workers
+	// Invoke workers.
 	for _, sid := range order {
 		service := services[sid]
-		if service.Code == nil && service.Exec != "" {
+		if service.Code == nil && len(service.Exec) > 0 {
 			cmd := service.prepare()
 			if service.Every != "" {
-				c.addCmd(service, cmd, chps)
+				c.addCmd(service, chps)
 			} else {
 				c.g.Go(func() error {
 					defer service.pipe.writer.Close()
@@ -257,39 +233,59 @@ func (c *config) Run() error {
 			}
 		}
 
-		// enable log worker if logWorker is true
-		if c.logWorker && (service.Code != nil || service.Exec != "") {
+		// Enable log worker if logWorker is true.
+		if c.logWorker && (service.Code != nil || len(service.Exec) > 0) {
 			rd := service.pipe.reader
 			go c.logging(bufio.NewScanner(rd), sid, service.color)
 		}
-		time.Sleep(c.interval)
+
+		// When the task is cron, it does not cause wait time.
+		if service.Every == "" {
+			time.Sleep(c.interval)
+		}
 	}
 
-	return c.wait()
+	return c.wait(chps, signals)
 }
 
 // Receive process ID to be executed. or
 // It traps the signal relate to parent process. sends a signal to the received process ID.
 func (c *config) waitSignals(signals <-chan os.Signal, chps <-chan *os.Process, cap int) {
 	procs := make([]*os.Process, 0, cap)
+LOOP:
 	for {
 		select {
 		case proc := <-chps:
+			// Replace the used process with the newly generated process.
+			for i, p := range procs {
+				if p == nil {
+					procs[i] = proc
+					continue LOOP
+				}
+			}
+			// If not used all processes, allocated newly.
 			procs = append(procs, proc)
 		case s := <-signals:
 			switch s {
 			case syscall.SIGTERM, syscall.SIGHUP:
-				for _, p := range procs {
-					p.Signal(syscall.SIGTERM)
-				}
+				sendSignal(syscall.SIGTERM, procs)
 			case syscall.SIGINT:
-				for _, p := range procs {
-					p.Signal(syscall.SIGINT)
-				}
+				sendSignal(syscall.SIGINT, procs)
 			}
 		case <-c.ctx.Done():
 			c.cron.Stop()
 			return
+		}
+	}
+}
+
+func sendSignal(sig syscall.Signal, procs []*os.Process) {
+	for i, p := range procs {
+		if p != nil {
+			p.Signal(sig)
+			if _, err := p.Wait(); err != nil {
+				procs[i] = nil
+			}
 		}
 	}
 }
@@ -305,16 +301,16 @@ func run(c *exec.Cmd, chps chan<- *os.Process) error {
 
 // Create a command
 func (s *Service) prepare() *exec.Cmd {
-	args := append(shell, s.Exec)
-	cmd := exec.Command(args[0], args[1:]...)
+	cmd := exec.Command(s.Exec[0], s.Exec[1:]...)
 	cmd.Stdout = s.pipe.writer
 	cmd.Stderr = s.pipe.writer
 	return cmd
 }
 
 // Add a task to execute the command to cron.
-func (c *config) addCmd(s Service, cmd *exec.Cmd, chps chan<- *os.Process) {
+func (c *config) addCmd(s Service, chps chan<- *os.Process) {
 	c.cron.AddFunc(s.Every, func() {
+		cmd := s.prepare()
 		run(cmd, chps)
 	})
 }
@@ -327,9 +323,11 @@ func (c *config) addTask(s Service) {
 }
 
 // Wait services
-func (c *config) wait() error {
+func (c *config) wait(chps chan<- *os.Process, sig chan<- os.Signal) error {
 	c.cron.Start()
-	return c.g.Wait()
+	err := c.g.Wait()
+	signal.Stop(sig)
+	return err
 }
 
 // Logging
