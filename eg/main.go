@@ -13,32 +13,34 @@ import (
 func main() {
 	p := golet.New(context.Background())
 	p.EnableColor()
+	// Execcution interval
 	p.SetInterval(time.Second * 1)
 
 	p.Env(map[string]string{
-		"NAME":  "KEI",
+		"NAME":  "codehex",
 		"VALUE": "121",
 	})
 
 	p.Add(
 		golet.Service{
-			Exec: []string{"echo", "Hello!!"},
-			// Every when 30 seconds
-			Every: "30 * * * * *",
+			Exec: "ping google.com",
+			Tag:  "ping",
 		},
 		golet.Service{
-			Exec:   []string{"ping", "google.com"},
-			Worker: 4,
+			Exec:   "echo 'Worker is 2!! PORT: $PORT'",
+			Every:  "30 * * * * *",
+			Worker: 2,
+			Tag:    "echo",
 		},
 	)
 
 	p.Add(golet.Service{
-		Code: func(w io.Writer) error {
-			fmt.Fprintln(w, "Hello golet!!")
-			fmt.Println(os.Getenv("NAME"), os.Getenv("VALUE"))
+		Code: func(w io.Writer, port int) error {
+			fmt.Fprintln(w, "Hello golet!! Port:", port)
+			fmt.Fprintln(w, os.Getenv("NAME"), os.Getenv("VALUE"))
 			return nil
 		},
-		Worker: 4,
+		Worker: 3,
 		Every:  "@every 10s",
 	})
 

@@ -9,7 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"sync"
+	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -46,7 +47,6 @@ type (
 		services   []Service
 		g          *errgroup.Group
 		ctx        context.Context
-		once       sync.Once
 		serviceNum int
 		tags       map[string]bool
 		basePort   int
@@ -55,15 +55,15 @@ type (
 
 	// Service struct to add services to golet.
 	Service struct {
-		Exec   []string
-		Code   func(io.Writer) error // Routine of services.
-		Worker int                   // Number of goroutine. The maximum number of workers is 100.
-		Tag    string                // Keyword for log.
-		Every  string                // Crontab like format. See https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format
+		Exec   string
+		Code   func(io.Writer, int) error // Routine of services.
+		Worker int                        // Number of goroutine. The maximum number of workers is 100.
+		Tag    string                     // Keyword for log.
+		Every  string                     // Crontab like format. See https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format
 
-		startPort int
-		color     color
-		pipe      pipe
+		port  int
+		color color
+		pipe  pipe
 	}
 
 	pipe struct {
@@ -71,6 +71,24 @@ type (
 		writer *os.File
 	}
 )
+
+var shell []string
+
+func init() {
+	if runtime.GOOS == "windows" {
+		path, err := exec.LookPath("cmd")
+		if err != nil {
+			panic("Could not find `cmd` command")
+		}
+		shell = []string{path, "/c"}
+	} else {
+		path, err := exec.LookPath("bash")
+		if err != nil {
+			panic("Could not find `bash` command")
+		}
+		shell = []string{path, "-c"}
+	}
+}
 
 // Runner interface have methods for configuration and to run services.
 type Runner interface {
@@ -161,7 +179,7 @@ func (c *config) Add(services ...Service) error {
 			return err
 		}
 
-		service.startPort = n
+		service.port = n
 		service.color = color(c.serviceNum%colornum + 32)
 
 		c.services = append(c.services, service)
@@ -194,14 +212,13 @@ func (c *config) Run() error {
 			sid := fmt.Sprintf("%s.%d", s.Tag, i)
 
 			s.pipe = pipe{in, out}
-			s.startPort += i
+			s.port += i
 			services[sid] = s
 			order = append(order, sid)
 		}
 	}
 
 	chps := make(chan *os.Process, 1)
-
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 
@@ -210,8 +227,14 @@ func (c *config) Run() error {
 	// Invoke workers.
 	for _, sid := range order {
 		service := services[sid]
-		if service.Code == nil && len(service.Exec) > 0 {
+		if service.Code == nil && service.Exec != "" {
 			cmd := service.prepare()
+			// Notify you have executed the command
+			if c.execNotice {
+				fmt.Fprintf(service.pipe.writer, "Exec command: %s\n", service.Exec)
+			}
+
+			// Execute the command with cron or goroutine
 			if service.Every != "" {
 				c.addCmd(service, chps)
 			} else {
@@ -223,18 +246,24 @@ func (c *config) Run() error {
 		}
 
 		if service.Code != nil {
+			// Notify you have run the callback
+			if c.execNotice {
+				fmt.Fprintf(service.pipe.writer, "Callback: %s\n", service.Tag)
+			}
+
+			// Run callback with cron or goroutine
 			if service.Every != "" {
 				c.addTask(service)
 			} else {
 				c.g.Go(func() error {
 					defer service.pipe.writer.Close()
-					return service.Code(service.pipe.writer)
+					return service.Code(service.pipe.writer, service.port)
 				})
 			}
 		}
 
 		// Enable log worker if logWorker is true.
-		if c.logWorker && (service.Code != nil || len(service.Exec) > 0) {
+		if c.logWorker && (service.Code != nil || service.Exec != "") {
 			rd := service.pipe.reader
 			go c.logging(bufio.NewScanner(rd), sid, service.color)
 		}
@@ -279,10 +308,12 @@ LOOP:
 	}
 }
 
+// sendSignal can send signal and replace os.Process struct of the terminated process with nil
 func sendSignal(sig syscall.Signal, procs []*os.Process) {
 	for i, p := range procs {
 		if p != nil {
 			p.Signal(sig)
+			// In case of error, the process has already finished.
 			if _, err := p.Wait(); err != nil {
 				procs[i] = nil
 			}
@@ -301,7 +332,9 @@ func run(c *exec.Cmd, chps chan<- *os.Process) error {
 
 // Create a command
 func (s *Service) prepare() *exec.Cmd {
-	cmd := exec.Command(s.Exec[0], s.Exec[1:]...)
+	c := strings.Replace(s.Exec, "$PORT", fmt.Sprintf("%d", s.port), -1)
+	args := append(shell, c)
+	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdout = s.pipe.writer
 	cmd.Stderr = s.pipe.writer
 	return cmd
@@ -310,15 +343,14 @@ func (s *Service) prepare() *exec.Cmd {
 // Add a task to execute the command to cron.
 func (c *config) addCmd(s Service, chps chan<- *os.Process) {
 	c.cron.AddFunc(s.Every, func() {
-		cmd := s.prepare()
-		run(cmd, chps)
+		run(s.prepare(), chps)
 	})
 }
 
 // Add a task to execute the code block to cron.
 func (c *config) addTask(s Service) {
 	c.cron.AddFunc(s.Every, func() {
-		s.Code(s.pipe.writer)
+		s.Code(s.pipe.writer, s.port)
 	})
 }
 
