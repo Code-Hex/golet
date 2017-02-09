@@ -49,7 +49,6 @@ type (
 		ctx        context.Context
 		serviceNum int
 		tags       map[string]bool
-		basePort   int
 		cron       *cron.Cron
 	}
 
@@ -167,6 +166,8 @@ func (c *config) Add(services ...Service) error {
 
 		if service.Worker <= 0 {
 			service.Worker = 1
+		} else if service.Worker > 100 {
+			service.Worker = 100
 		}
 
 		if _, ok := c.tags[service.Tag]; ok {
@@ -199,23 +200,9 @@ func (c *config) Run() error {
 
 	order := make([]string, 0, cap)
 
-	// Assignment services.
-	for _, service := range c.services {
-		worker := service.Worker
-		for i := 1; i <= worker; i++ {
-			in, out, err := os.Pipe()
-			if err != nil {
-				return err
-			}
-
-			s := service
-			sid := fmt.Sprintf("%s.%d", s.Tag, i)
-
-			s.pipe = pipe{in, out}
-			s.port += i
-			services[sid] = s
-			order = append(order, sid)
-		}
+	// Assign services.
+	if err := c.assign(&order, services); err != nil {
+		return err
 	}
 
 	chps := make(chan *os.Process, 1)
@@ -277,11 +264,35 @@ func (c *config) Run() error {
 	return c.wait(chps, signals)
 }
 
+// Assign the service ID.
+// It also make `order` slice to keep key order of `map[string]Service`.
+func (c *config) assign(order *[]string, services map[string]Service) error {
+	for _, service := range c.services {
+		worker := service.Worker
+		for i := 1; i <= worker; i++ {
+			in, out, err := os.Pipe()
+			if err != nil {
+				return err
+			}
+
+			s := service
+			sid := fmt.Sprintf("%s.%d", s.Tag, i)
+
+			s.pipe = pipe{in, out}
+			s.port += i
+			services[sid] = s
+			*order = append(*order, sid)
+		}
+	}
+
+	return nil
+}
+
 // Receive process ID to be executed. or
 // It traps the signal relate to parent process. sends a signal to the received process ID.
 func (c *config) waitSignals(signals <-chan os.Signal, chps <-chan *os.Process, cap int) {
 	procs := make([]*os.Process, 0, cap)
-LOOP:
+Loop:
 	for {
 		select {
 		case proc := <-chps:
@@ -289,7 +300,7 @@ LOOP:
 			for i, p := range procs {
 				if p == nil {
 					procs[i] = proc
-					continue LOOP
+					continue Loop
 				}
 			}
 			// If not used all processes, allocated newly.
