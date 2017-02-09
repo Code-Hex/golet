@@ -1,8 +1,8 @@
 golet
 =====
 [![Build Status](https://travis-ci.org/Code-Hex/golet.svg?branch=master)](https://travis-ci.org/Code-Hex/golet) [![GoDoc](https://godoc.org/github.com/Code-Hex/golet?status.svg)](https://godoc.org/github.com/Code-Hex/golet) [![Go Report Card](https://goreportcard.com/badge/github.com/Code-Hex/golet)](https://goreportcard.com/report/github.com/Code-Hex/golet)  
-golet is minimalistic Supervisor, fork and manage many services from one golang program. 
-It supports go version 1.7 or higher. 
+golet is minimalistic Supervisor, fork and manage many services from one golang program.  
+It supports go version 1.7 or higher.  
 It is based on the idea of [Proclet](https://metacpan.org/pod/Proclet).  
 Proclet is great module in Perl.  
 
@@ -147,3 +147,11 @@ p.Env(map[string]string{
 3. Create a new Pull Request
 
 I'm waiting for a lot of PR.
+
+# Future
+- [ ] Create like [foreman](https://github.com/ddollar/foreman) command
+- [ ] Support better windows
+- [ ] Write a test for signals for some distribution
+
+# Author
+[codehex](https://twitter.com/CodeHex)
