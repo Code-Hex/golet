@@ -31,8 +31,8 @@ func IsPortAvailable(port int) bool {
 func GetPort() (int, error) {
 	for i := previousPort; i < maxPort; i++ {
 		if IsPortAvailable(i) {
-			// Next previousPort is 2024 if i == 1024 now.
-			previousPort = i + 1000
+			// Next previousPort is 1124 if i == 1024 now.
+			previousPort = i + 100
 			return i, nil
 		}
 	}
