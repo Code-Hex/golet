@@ -1,6 +1,7 @@
 golet
 =====
-I made golet based on the idea of [Proclet](https://metacpan.org/pod/Proclet).  
+golet is minimalistic Supervisor, fork and manage many services from one golang program.  
+It is based on the idea of [Proclet](https://metacpan.org/pod/Proclet).  
 Proclet is great module in Perl.  
 
 # Synopsis
@@ -54,9 +55,6 @@ func main() {
 	p.Run()
 }
 ```
-
-# Description
-Golet is minimalistic Supervisor like Proclet, fork and manage many services from one golang program.
 
 # Logging
 In case to run code of synopsis.
