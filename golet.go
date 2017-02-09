@@ -296,7 +296,8 @@ Loop:
 	for {
 		select {
 		case proc := <-chps:
-			// Replace the used process with the newly generated process.
+			// Replace the used process(nil) with the newly generated process.
+			// This run to reduce the memory allocation frequency.
 			for i, p := range procs {
 				if p == nil {
 					procs[i] = proc

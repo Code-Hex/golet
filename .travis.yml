@@ -1,0 +1,15 @@
+language: go
+sudo: false
+
+go:
+  - 1.5.4
+  - 1.6.4
+  - 1.7.4
+  - tip
+
+script:
+  - go test -cover
+  - go get github.com/mattn/goveralls
+
+after_script:
+  - goveralls

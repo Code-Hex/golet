@@ -1,3 +1,5 @@
+// +build darwin dragonfly freebsd linux netbsd openbsd solaris
+
 package golet
 
 import (
@@ -5,12 +7,28 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 
+	colorable "github.com/mattn/go-colorable"
 	"github.com/stretchr/testify/assert"
 )
 
 var ctx = context.Background()
+
+func TestDefault(t *testing.T) {
+	p := New(ctx)
+
+	assert.Equal(t, time.Duration(0), p.(*config).interval)
+	assert.Equal(t, false, p.(*config).color)
+	assert.Equal(t, colorable.NewColorableStderr(), p.(*config).logger)
+	assert.Equal(t, true, p.(*config).logWorker)
+	assert.Equal(t, true, p.(*config).execNotice)
+}
 
 func TestEnv(t *testing.T) {
 	maps := []map[string]string{
@@ -98,6 +116,62 @@ func TestAssign(t *testing.T) {
 			x++
 		}
 	}
+}
+
+func TestWait(t *testing.T) {
+	c := exec.Command("go", "build", "-o", "sleep", "sleep.go")
+	c.Dir = "_testdata"
+	defer os.Remove(filepath.Join(c.Dir, "sleep"))
+	if err := c.Run(); err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	_ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
+	p := New(_ctx)
+
+	chps := make(chan *os.Process, 1)
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
+
+	times := 3
+	go p.(*config).waitSignals(sig, chps, times)
+
+	finch := make(chan bool)
+
+	for i := 0; i < times; i++ {
+		p.(*config).g.Go(func() error {
+			cmd := exec.Command("./sleep", "5")
+			cmd.Dir = "_testdata"
+			if err := run(cmd, chps); err == nil {
+				return fmt.Errorf("Failed to send a signal")
+			}
+			finch <- true
+			return nil
+		})
+	}
+
+	// Send a signal to self test
+	go func() {
+		time.Sleep(time.Second * 1)
+		syscall.Kill(syscall.Getpid(), syscall.SIGHUP)
+	}()
+
+	i := 0
+	for i < times {
+		select {
+		case <-finch:
+			i++
+		case <-_ctx.Done():
+			t.Fatalf("Timeout: Could not send signals to all processes")
+		}
+	}
+
+	if err := p.(*config).wait(chps, sig); err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	assert.Equal(t, times, i, "Could not send signals to all processes")
 }
 
 func ServiceGen() []Service {
