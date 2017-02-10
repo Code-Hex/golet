@@ -1,7 +1,7 @@
-golet
+Golet
 =====
 [![Build Status](https://travis-ci.org/Code-Hex/golet.svg?branch=master)](https://travis-ci.org/Code-Hex/golet) [![GoDoc](https://godoc.org/github.com/Code-Hex/golet?status.svg)](https://godoc.org/github.com/Code-Hex/golet) [![Go Report Card](https://goreportcard.com/badge/github.com/Code-Hex/golet)](https://goreportcard.com/report/github.com/Code-Hex/golet)  
-golet is minimalistic Supervisor, fork and manage many services from one golang program.  
+Golet can manage many services with goroutine from one golang program.  
 It supports go version 1.7 or higher.  
 It is based on the idea of [Proclet](https://metacpan.org/pod/Proclet).  
 Proclet is great module in Perl.  
@@ -47,12 +47,14 @@ func main() {
 	p.Add(golet.Service{
 		Code: func(w io.Writer, port int) {
 			fmt.Fprintln(w, "Hello golet!! Port:", port)
-			http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(w, "Hello, World")
 			})
 
-			http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
+			http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
 		},
+		Worker: 3,
 	})
 
 	p.Run()
@@ -61,7 +63,7 @@ func main() {
 See [eg](https://github.com/Code-Hex/golet/tree/master/eg).
 # Logging
 In case to run code of synopsis.
-![Logging](https://cloud.githubusercontent.com/assets/6500104/22810921/119973bc-ef7f-11e6-91df-5f8f69758ca0.png)
+![Logging](https://cloud.githubusercontent.com/assets/6500104/22811713/da803d8e-ef83-11e6-9534-1edf3f22ddfa.png)
 
 # Usage
 ## Basic
