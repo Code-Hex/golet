@@ -14,7 +14,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
+	"net/http"
 	"time"
 
 	"github.com/Code-Hex/golet"
@@ -33,34 +33,35 @@ func main() {
 
 	p.Add(
 		golet.Service{
-			Exec: "ping google.com",
-			Tag:  "ping",
+			Exec: "plackup --port $PORT",
+			Tag:  "plack",
 		},
 		golet.Service{
-			Exec:   "echo 'Worker is 2!! PORT: $PORT'",
+			Exec:   "echo 'This is cron!!'",
 			Every:  "30 * * * * *",
 			Worker: 2,
-			Tag:    "echo",
+			Tag:    "cron",
 		},
 	)
 
 	p.Add(golet.Service{
-		Code: func(w io.Writer, port int) error {
+		Code: func(w io.Writer, port int) {
 			fmt.Fprintln(w, "Hello golet!! Port:", port)
-			fmt.Fprintln(w, os.Getenv("NAME"), os.Getenv("VALUE"))
-			return nil
+			http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, "Hello, World")
+			})
+
+			http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 		},
-		Worker: 3,
-		Every:  "@every 10s",
 	})
 
 	p.Run()
 }
 ```
-
+See [eg](https://github.com/Code-Hex/golet/tree/master/eg).
 # Logging
 In case to run code of synopsis.
-![Logging](https://cloud.githubusercontent.com/assets/6500104/22722641/efd64978-edfb-11e6-8f21-3d44e0ea7f52.png)
+![Logging](https://cloud.githubusercontent.com/assets/6500104/22810921/119973bc-ef7f-11e6-91df-5f8f69758ca0.png)
 
 # Usage
 ## Basic
@@ -73,16 +74,16 @@ Next, We can add the service using the `Service` struct.
 ```go
 p.Add(
 	golet.Service{
-		Exec: "ping google.com",
-		Tag:  "ping",  // Keyword for log.
+		// Replace $PORT and automatically assigned port number.
+		Exec: "plackup --port $PORT",
+		Tag:  "plack", // Keyword for log.
 	},
 	golet.Service{
-		// Replace $PORT and automatically assigned port number.
-		Exec:   "echo 'Worker is 2!! PORT: $PORT'",
+		Exec:   "echo 'This is cron!!'",
 		// Crontab like format. 
 		Every:  "30 * * * * *", // See https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format
 		Worker: 2,              // Number of goroutine. The maximum number of workers is 100.
-		Tag:    "echo",
+		Tag:    "cron",
 	},
 )
 ```

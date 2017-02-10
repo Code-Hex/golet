@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
+	"net/http"
 	"time"
 
 	"github.com/Code-Hex/golet"
@@ -23,25 +23,26 @@ func main() {
 
 	p.Add(
 		golet.Service{
-			Exec: "ping google.com",
-			Tag:  "ping",
+			Exec: "plackup --port $PORT",
+			Tag:  "plack",
 		},
 		golet.Service{
-			Exec:   "echo 'Worker is 2!! PORT: $PORT'",
+			Exec:   "echo 'This is cron!!'",
 			Every:  "30 * * * * *",
 			Worker: 2,
-			Tag:    "echo",
+			Tag:    "cron",
 		},
 	)
 
 	p.Add(golet.Service{
-		Code: func(w io.Writer, port int) error {
+		Code: func(w io.Writer, port int) {
 			fmt.Fprintln(w, "Hello golet!! Port:", port)
-			fmt.Fprintln(w, os.Getenv("NAME"), os.Getenv("VALUE"))
-			return nil
+			http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, "Hello, World")
+			})
+
+			http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 		},
-		Worker: 3,
-		Every:  "@every 10s",
 	})
 
 	p.Run()

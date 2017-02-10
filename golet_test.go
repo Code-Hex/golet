@@ -181,8 +181,7 @@ func ServiceGen() []Service {
 			Tag:  "ping",
 		},
 		{
-			Code: func(w io.Writer, port int) error {
-				return nil
+			Code: func(w io.Writer, port int) {
 			},
 			Tag: "code",
 		},
@@ -198,8 +197,7 @@ func ServiceGen() []Service {
 			Tag:    "ping-cron",
 		},
 		{
-			Code: func(w io.Writer, port int) error {
-				return nil
+			Code: func(w io.Writer, port int) {
 			},
 			Every:  "@every 20s",
 			Worker: -100,
@@ -207,8 +205,7 @@ func ServiceGen() []Service {
 		},
 		{
 			Exec: "ping google.com",
-			Code: func(w io.Writer, port int) error {
-				return nil
+			Code: func(w io.Writer, port int) {
 			},
 			Every:  "30 * * * * *",
 			Worker: 40000,

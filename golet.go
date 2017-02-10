@@ -55,10 +55,10 @@ type (
 	// Service struct to add services to golet.
 	Service struct {
 		Exec   string
-		Code   func(io.Writer, int) error // Routine of services.
-		Worker int                        // Number of goroutine. The maximum number of workers is 100.
-		Tag    string                     // Keyword for log.
-		Every  string                     // Crontab like format. See https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format
+		Code   func(io.Writer, int) // Routine of services.
+		Worker int                  // Number of goroutine. The maximum number of workers is 100.
+		Tag    string               // Keyword for log.
+		Every  string               // Crontab like format. See https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format
 
 		port  int
 		color color
@@ -244,7 +244,9 @@ func (c *config) Run() error {
 			} else {
 				c.g.Go(func() error {
 					defer service.pipe.writer.Close()
-					return service.Code(service.pipe.writer, service.port)
+					go service.Code(service.pipe.writer, service.port)
+					<-c.ctx.Done()
+					return nil
 				})
 			}
 		}
@@ -362,7 +364,8 @@ func (c *config) addCmd(s Service, chps chan<- *os.Process) {
 // Add a task to execute the code block to cron.
 func (c *config) addTask(s Service) {
 	c.cron.AddFunc(s.Every, func() {
-		s.Code(s.pipe.writer, s.port)
+		go s.Code(s.pipe.writer, s.port)
+		<-c.ctx.Done()
 	})
 }
 
