@@ -35,14 +35,15 @@ func main() {
 	)
 
 	p.Add(golet.Service{
-		Code: func(w io.Writer, port int) {
+		Code: func(ctx context.Context, w io.Writer, port int) {
 			fmt.Fprintln(w, "Hello golet!! Port:", port)
 			mux := http.NewServeMux()
 			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(w, "Hello, World")
 			})
 
-			http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
+			go http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
+			<-ctx.Done()
 		},
 		Worker: 3,
 	})

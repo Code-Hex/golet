@@ -11,13 +11,13 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/Code-Hex/golet/internal/port"
 	colorable "github.com/mattn/go-colorable"
 	"github.com/robfig/cron"
-	"golang.org/x/sync/errgroup"
 )
 
 type color int
@@ -45,7 +45,9 @@ type (
 		execNotice bool          // enable start and exec notice message like: `16:38:12 worker.1 | Start callback: worker``.
 
 		services   []Service
-		g          *errgroup.Group
+		wg         sync.WaitGroup
+		once       sync.Once
+		cancel     func()
 		ctx        context.Context
 		serviceNum int
 		tags       map[string]bool
@@ -55,10 +57,10 @@ type (
 	// Service struct to add services to golet.
 	Service struct {
 		Exec   string
-		Code   func(io.Writer, int) // Routine of services.
-		Worker int                  // Number of goroutine. The maximum number of workers is 100.
-		Tag    string               // Keyword for log.
-		Every  string               // Crontab like format. See https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format
+		Code   func(context.Context, io.Writer, int) // Routine of services.
+		Worker int                                   // Number of goroutine. The maximum number of workers is 100.
+		Tag    string                                // Keyword for log.
+		Every  string                                // Crontab like format. See https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format
 
 		port  int
 		color color
@@ -130,7 +132,7 @@ func (c *config) DisableExecNotice() { c.execNotice = false }
 
 // New to create struct of golet.
 func New(c context.Context) Runner {
-	g, ctx := errgroup.WithContext(c)
+	ctx, cancel := context.WithCancel(c)
 	return &config{
 		interval:   0,
 		color:      false,
@@ -138,10 +140,10 @@ func New(c context.Context) Runner {
 		logWorker:  true,
 		execNotice: true,
 
-		g:    g,
-		ctx:  ctx,
-		tags: map[string]bool{},
-		cron: cron.New(),
+		ctx:    ctx,
+		cancel: cancel,
+		tags:   map[string]bool{},
+		cron:   cron.New(),
 	}
 }
 
@@ -192,13 +194,7 @@ func (c *config) Add(services ...Service) error {
 func (c *config) Run() error {
 	services := make(map[string]Service)
 
-	// Calculate of the number of workers.
-	cap := 0
-	for _, service := range c.services {
-		cap += service.Worker
-	}
-
-	order := make([]string, 0, cap)
+	order := make([]string, 0, c.calcCapacitySize())
 
 	// Assign services.
 	if err := c.assign(&order, services); err != nil {
@@ -215,39 +211,60 @@ func (c *config) Run() error {
 	for _, sid := range order {
 		service := services[sid]
 		if service.Code == nil && service.Exec != "" {
-			cmd := service.prepare()
-			// Notify you have executed the command
-			if c.execNotice {
-				fmt.Fprintf(service.pipe.writer, "Exec command: %s\n", service.Exec)
-			}
-
 			// Execute the command with cron or goroutine
 			if service.Every != "" {
 				c.addCmd(service, chps)
 			} else {
-				c.g.Go(func() error {
-					defer service.pipe.writer.Close()
-					return run(cmd, chps)
-				})
+				c.wg.Add(1)
+
+				go func() {
+					defer func() {
+						service.pipe.writer.Close()
+						c.wg.Done()
+					}()
+
+					for {
+						// Notify you have executed the command
+						if c.execNotice {
+							fmt.Fprintf(service.pipe.writer, "Exec command: %s\n", service.Exec)
+						}
+						select {
+						case <-c.ctx.Done():
+							return
+						default:
+							run(service.prepare(), chps)
+						}
+					}
+				}()
 			}
 		}
 
 		if service.Code != nil {
-			// Notify you have run the callback
-			if c.execNotice {
-				fmt.Fprintf(service.pipe.writer, "Callback: %s\n", service.Tag)
-			}
-
 			// Run callback with cron or goroutine
 			if service.Every != "" {
 				c.addTask(service)
 			} else {
-				c.g.Go(func() error {
-					defer service.pipe.writer.Close()
-					go service.Code(service.pipe.writer, service.port)
-					<-c.ctx.Done()
-					return nil
-				})
+				c.wg.Add(1)
+
+				go func() {
+					defer func() {
+						service.pipe.writer.Close()
+						c.wg.Done()
+					}()
+
+					for {
+						// Notify you have run the callback
+						if c.execNotice {
+							fmt.Fprintf(service.pipe.writer, "Callback: %s\n", service.Tag)
+						}
+						select {
+						case <-c.ctx.Done():
+							return
+						default:
+							service.Code(c.ctx, service.pipe.writer, service.port)
+						}
+					}
+				}()
 			}
 		}
 
@@ -263,7 +280,17 @@ func (c *config) Run() error {
 		}
 	}
 
-	return c.wait(chps, signals)
+	c.wait(chps, signals)
+
+	return nil
+}
+
+// Calculate of the number of workers.
+func (c *config) calcCapacitySize() (cap int) {
+	for _, service := range c.services {
+		cap += service.Worker
+	}
+	return
 }
 
 // Assign the service ID.
@@ -311,6 +338,13 @@ Loop:
 		case s := <-signals:
 			switch s {
 			case syscall.SIGTERM, syscall.SIGHUP:
+				c.once.Do(func() {
+					if c.cancel != nil {
+						c.cancel()
+					}
+					time.Sleep(time.Second * 1)
+				})
+
 				sendSignal(syscall.SIGTERM, procs)
 			case syscall.SIGINT:
 				sendSignal(syscall.SIGINT, procs)
@@ -356,6 +390,10 @@ func (s *Service) prepare() *exec.Cmd {
 
 // Add a task to execute the command to cron.
 func (c *config) addCmd(s Service, chps chan<- *os.Process) {
+	// Notify you have executed the command
+	if c.execNotice {
+		fmt.Fprintf(s.pipe.writer, "Exec command: %s\n", s.Exec)
+	}
 	c.cron.AddFunc(s.Every, func() {
 		run(s.prepare(), chps)
 	})
@@ -363,18 +401,21 @@ func (c *config) addCmd(s Service, chps chan<- *os.Process) {
 
 // Add a task to execute the code block to cron.
 func (c *config) addTask(s Service) {
+	// Notify you have run the callback
+	if c.execNotice {
+		fmt.Fprintf(s.pipe.writer, "Callback: %s\n", s.Tag)
+	}
+
 	c.cron.AddFunc(s.Every, func() {
-		go s.Code(s.pipe.writer, s.port)
-		<-c.ctx.Done()
+		s.Code(c.ctx, s.pipe.writer, s.port)
 	})
 }
 
 // Wait services
-func (c *config) wait(chps chan<- *os.Process, sig chan<- os.Signal) error {
+func (c *config) wait(chps chan<- *os.Process, sig chan<- os.Signal) {
 	c.cron.Start()
-	err := c.g.Wait()
+	c.wg.Wait()
 	signal.Stop(sig)
-	return err
 }
 
 // Logging
