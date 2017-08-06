@@ -13,7 +13,7 @@ import (
 func main() {
 	p := golet.New(context.Background())
 	p.EnableColor()
-	// Execcution interval
+	// Execution interval
 	p.SetInterval(time.Second * 1)
 
 	p.Env(map[string]string{

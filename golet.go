@@ -36,7 +36,7 @@ const (
 type (
 	// config is main struct.
 	// struct comments from http://search.cpan.org/dist/Proclet/lib/Proclet.pm
-	// Proclet is great module!!
+	// Proclet is a great module!!
 	config struct {
 		interval   time.Duration // interval in seconds between spawning services unless a service exits abnormally.
 		color      bool          // colored log.
@@ -210,9 +210,9 @@ func (c *config) Run() error {
 	// Invoke workers.
 	for _, sid := range order {
 		service := services[sid]
-		if service.Code == nil && service.Exec != "" {
+		if service.isExecute() {
 			// Execute the command with cron or goroutine
-			if service.Every != "" {
+			if service.isCron() {
 				c.addCmd(service, chps)
 			} else {
 				c.wg.Add(1)
@@ -239,9 +239,9 @@ func (c *config) Run() error {
 			}
 		}
 
-		if service.Code != nil {
+		if service.isCode() {
 			// Run callback with cron or goroutine
-			if service.Every != "" {
+			if service.isCron() {
 				c.addTask(service)
 			} else {
 				c.wg.Add(1)
@@ -345,9 +345,9 @@ Loop:
 					time.Sleep(time.Second * 1)
 				})
 
-				sendSignal(syscall.SIGTERM, procs)
+				sendSignal2Procs(syscall.SIGTERM, procs)
 			case syscall.SIGINT:
-				sendSignal(syscall.SIGINT, procs)
+				sendSignal2Procs(syscall.SIGINT, procs)
 			}
 		case <-c.ctx.Done():
 			c.cron.Stop()
@@ -356,8 +356,8 @@ Loop:
 	}
 }
 
-// sendSignal can send signal and replace os.Process struct of the terminated process with nil
-func sendSignal(sig syscall.Signal, procs []*os.Process) {
+// sendSignal2Procs can send signal and replace os.Process struct of the terminated process with nil
+func sendSignal2Procs(sig syscall.Signal, procs []*os.Process) {
 	for i, p := range procs {
 		if p != nil {
 			p.Signal(sig)
@@ -432,4 +432,16 @@ func (c *config) logging(sc *bufio.Scanner, sid string, clr color) {
 			fmt.Fprintf(c.logger, "%02d:%02d:%02d %-10s | %s\n", hour, min, sec, sid, sc.Text())
 		}
 	}
+}
+
+func (s *Service) isExecute() bool {
+	return s.Code == nil && s.Exec != ""
+}
+
+func (s *Service) isCode() bool {
+	return s.Code != nil
+}
+
+func (s *Service) isCron() bool {
+	return s.Every != ""
 }
