@@ -209,7 +209,6 @@ func (c *config) Run() error {
 							// If golet is recieved signal or exit code is 0, golet do not restart process.
 							if err := run(service.prepare(), chps); err != nil {
 								if exiterr, ok := err.(*exec.ExitError); ok {
-									// The program has exited with an exit code != 0
 									// See https://stackoverflow.com/a/10385867
 									if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
 										if !status.Signaled() {
