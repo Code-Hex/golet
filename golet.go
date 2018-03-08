@@ -140,17 +140,12 @@ func (c *config) Env(envs map[string]string) error {
 func (c *config) Add(services ...Service) error {
 	for _, service := range services {
 		c.serviceNum++
-
 		if service.Tag == "" {
 			service.Tag = fmt.Sprintf("%d", c.serviceNum)
 		}
-
 		if service.Worker <= 0 {
 			service.Worker = 1
-		} else if service.Worker > 100 {
-			service.Worker = 100
 		}
-
 		if _, ok := c.tags[service.Tag]; ok {
 			return errors.New("tag: " + service.Tag + " is already exists")
 		}
@@ -195,13 +190,11 @@ func (c *config) Run() error {
 				c.addCmd(service, chps)
 			} else {
 				c.wg.Add(1)
-
 				go func() {
 					defer func() {
 						service.ctx.Close()
 						c.wg.Done()
 					}()
-
 					for {
 						// Notify you have executed the command
 						if c.execNotice {
@@ -224,7 +217,6 @@ func (c *config) Run() error {
 				c.addTask(service)
 			} else {
 				c.wg.Add(1)
-
 				go func() {
 					defer func() {
 						service.ctx.Close()
@@ -247,13 +239,11 @@ func (c *config) Run() error {
 				}()
 			}
 		}
-
 		// Enable log worker if logWorker is true.
 		if c.logWorker && (service.Code != nil || service.Exec != "") {
 			rd := service.reader
 			go c.logging(bufio.NewScanner(rd), sid, service.color)
 		}
-
 		// When the task is cron, it does not cause wait time.
 		if service.Every == "" {
 			time.Sleep(c.interval)
@@ -368,7 +358,6 @@ func (c *config) addTask(s Service) {
 	if c.execNotice {
 		s.Printf("Callback: %s\n", s.Tag)
 	}
-
 	c.cron.AddFunc(s.Every, func() {
 		s.Code(c.ctx, s.ctx)
 	})
