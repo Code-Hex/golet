@@ -5,7 +5,6 @@ package golet
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -76,10 +75,6 @@ func TestAdd(t *testing.T) {
 		assert.Equal(t, p1s[i].Every, p2s[i].Every)
 		assert.Equal(t, p1s[i].Worker, p2s[i].Worker)
 		assert.Equal(t, p1s[i].color, p2s[i].color)
-		if 0 < i && i < ln-1 {
-			assert.Equal(t, p1s[i-1].port+100, p1s[i].port)
-			assert.Equal(t, p2s[i-1].port+100, p2s[i].port)
-		}
 	}
 }
 
@@ -135,20 +130,18 @@ func TestWait(t *testing.T) {
 	signal.Notify(sig, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 
 	times := 3
-	go p.(*config).waitSignals(sig, chps, times)
+	go p.(*config).waitSignals(chps, times)
 
 	finch := make(chan bool)
-
 	for i := 0; i < times; i++ {
-		p.(*config).g.Go(func() error {
+		go func() {
 			cmd := exec.Command("./sleep", "5")
 			cmd.Dir = "_testdata"
 			if err := run(cmd, chps); err == nil {
-				return fmt.Errorf("Failed to send a signal")
+				panic(err)
 			}
 			finch <- true
-			return nil
-		})
+		}()
 	}
 
 	// Send a signal to self test
@@ -167,9 +160,7 @@ func TestWait(t *testing.T) {
 		}
 	}
 
-	if err := p.(*config).wait(chps, sig); err != nil {
-		t.Fatalf(err.Error())
-	}
+	p.(*config).wait(chps)
 
 	assert.Equal(t, times, i, "Could not send signals to all processes")
 }
@@ -181,7 +172,8 @@ func ServiceGen() []Service {
 			Tag:  "ping",
 		},
 		{
-			Code: func(w io.Writer, port int) {
+			Code: func(c context.Context) error {
+				return nil
 			},
 			Tag: "code",
 		},
@@ -197,19 +189,12 @@ func ServiceGen() []Service {
 			Tag:    "ping-cron",
 		},
 		{
-			Code: func(w io.Writer, port int) {
+			Code: func(c context.Context) error {
+				return nil
 			},
 			Every:  "@every 20s",
 			Worker: -100,
 			Tag:    "code-cron",
-		},
-		{
-			Exec: "ping google.com",
-			Code: func(w io.Writer, port int) {
-			},
-			Every:  "30 * * * * *",
-			Worker: 40000,
-			Tag:    "complex",
 		},
 	}
 }
