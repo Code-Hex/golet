@@ -3,12 +3,19 @@ package golet
 import (
 	"fmt"
 	"io"
+	"os"
 )
 
 // Context struct for golet
 type Context struct {
 	w    io.Writer
 	port int
+}
+
+// Close closes the Pipe writer, rendering it unusable for I/O.
+// It returns an error, if any.
+func (c *Context) Close() error {
+	return c.w.(*os.File).Close()
 }
 
 // Port returns assgined port

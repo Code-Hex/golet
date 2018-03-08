@@ -198,7 +198,7 @@ func (c *config) Run() error {
 
 				go func() {
 					defer func() {
-						service.pipe.writer.Close()
+						service.ctx.Close()
 						c.wg.Done()
 					}()
 
@@ -227,7 +227,7 @@ func (c *config) Run() error {
 
 				go func() {
 					defer func() {
-						service.pipe.writer.Close()
+						service.ctx.Close()
 						c.wg.Done()
 					}()
 					// If this callback is dead, we should restart it. (like a supervisor)
@@ -250,7 +250,7 @@ func (c *config) Run() error {
 
 		// Enable log worker if logWorker is true.
 		if c.logWorker && (service.Code != nil || service.Exec != "") {
-			rd := service.reader()
+			rd := service.reader
 			go c.logging(bufio.NewScanner(rd), sid, service.color)
 		}
 
