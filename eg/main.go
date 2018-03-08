@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -35,14 +34,13 @@ func main() {
 	)
 
 	p.Add(golet.Service{
-		Code: func(ctx context.Context, w io.Writer, port int) {
-			fmt.Fprintln(w, "Hello golet!! Port:", port)
+		Code: func(ctx context.Context, c *golet.Context) {
+			c.Println("Hello golet!! Port:", c.Port())
 			mux := http.NewServeMux()
 			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(w, "Hello, World")
 			})
-
-			go http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
+			go http.ListenAndServe(c.ServePort(), mux)
 			<-ctx.Done()
 		},
 		Worker: 3,

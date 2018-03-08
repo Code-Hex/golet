@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -33,45 +32,25 @@ const (
 	colornum int = 5
 )
 
-type (
-	// config is main struct.
-	// struct comments from http://search.cpan.org/dist/Proclet/lib/Proclet.pm
-	// Proclet is a great module!!
-	config struct {
-		interval   time.Duration // interval in seconds between spawning services unless a service exits abnormally.
-		color      bool          // colored log.
-		logger     io.Writer     // sets the output destination file. use stderr by default.
-		logWorker  bool          // enable worker for format logs. If disabled this option, cannot use logger opt too.
-		execNotice bool          // enable start and exec notice message like: `16:38:12 worker.1 | Start callback: worker``.
+// config is main struct.
+// struct comments from http://search.cpan.org/dist/Proclet/lib/Proclet.pm
+// Proclet is a great module!!
+type config struct {
+	interval   time.Duration // interval in seconds between spawning services unless a service exits abnormally.
+	color      bool          // colored log.
+	logger     io.Writer     // sets the output destination file. use stderr by default.
+	logWorker  bool          // enable worker for format logs. If disabled this option, cannot use logger opt too.
+	execNotice bool          // enable start and exec notice message like: `16:38:12 worker.1 | Start callback: worker``.
 
-		services   []Service
-		wg         sync.WaitGroup
-		once       sync.Once
-		cancel     func()
-		ctx        context.Context
-		serviceNum int
-		tags       map[string]bool
-		cron       *cron.Cron
-	}
-
-	// Service struct to add services to golet.
-	Service struct {
-		Exec   string
-		Code   func(context.Context, io.Writer, int) // Routine of services.
-		Worker int                                   // Number of goroutine. The maximum number of workers is 100.
-		Tag    string                                // Keyword for log.
-		Every  string                                // Crontab like format. See https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format
-
-		port  int
-		color color
-		pipe  pipe
-	}
-
-	pipe struct {
-		reader *os.File
-		writer *os.File
-	}
-)
+	services   []Service
+	wg         sync.WaitGroup
+	once       sync.Once
+	cancel     func()
+	ctx        context.Context
+	serviceNum int
+	tags       map[string]bool
+	cron       *cron.Cron
+}
 
 var shell []string
 
@@ -182,7 +161,7 @@ func (c *config) Add(services ...Service) error {
 			return err
 		}
 
-		service.port = n
+		service.tmpPort = n
 		service.color = color(c.serviceNum%colornum + 32)
 
 		c.services = append(c.services, service)
@@ -226,7 +205,7 @@ func (c *config) Run() error {
 					for {
 						// Notify you have executed the command
 						if c.execNotice {
-							fmt.Fprintf(service.pipe.writer, "Exec command: %s\n", service.Exec)
+							service.Printf("Exec command: %s\n", service.Exec)
 						}
 						select {
 						case <-c.ctx.Done():
@@ -251,17 +230,18 @@ func (c *config) Run() error {
 						service.pipe.writer.Close()
 						c.wg.Done()
 					}()
-
+					// If this callback is dead, we should restart it. (like a supervisor)
+					// So, this loop for that.
 					for {
 						// Notify you have run the callback
 						if c.execNotice {
-							fmt.Fprintf(service.pipe.writer, "Callback: %s\n", service.Tag)
+							service.Printf("Callback: %s\n", service.Tag)
 						}
 						select {
 						case <-c.ctx.Done():
 							return
 						default:
-							service.Code(c.ctx, service.pipe.writer, service.port)
+							service.Code(c.ctx, service.ctx)
 						}
 					}
 				}()
@@ -270,7 +250,7 @@ func (c *config) Run() error {
 
 		// Enable log worker if logWorker is true.
 		if c.logWorker && (service.Code != nil || service.Exec != "") {
-			rd := service.pipe.reader
+			rd := service.reader()
 			go c.logging(bufio.NewScanner(rd), sid, service.color)
 		}
 
@@ -299,21 +279,15 @@ func (c *config) assign(order *[]string, services map[string]Service) error {
 	for _, service := range c.services {
 		worker := service.Worker
 		for i := 1; i <= worker; i++ {
-			in, out, err := os.Pipe()
-			if err != nil {
+			s := service
+			if err := s.createContext(i); err != nil {
 				return err
 			}
-
-			s := service
 			sid := fmt.Sprintf("%s.%d", s.Tag, i)
-
-			s.pipe = pipe{in, out}
-			s.port += i
 			services[sid] = s
 			*order = append(*order, sid)
 		}
 	}
-
 	return nil
 }
 
@@ -344,7 +318,6 @@ Loop:
 					}
 					time.Sleep(time.Second * 1)
 				})
-
 				sendSignal2Procs(syscall.SIGTERM, procs)
 			case syscall.SIGINT:
 				sendSignal2Procs(syscall.SIGINT, procs)
@@ -378,21 +351,11 @@ func run(c *exec.Cmd, chps chan<- *os.Process) error {
 	return c.Wait()
 }
 
-// Create a command
-func (s *Service) prepare() *exec.Cmd {
-	c := strings.Replace(s.Exec, "$PORT", fmt.Sprintf("%d", s.port), -1)
-	args := append(shell, c)
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdout = s.pipe.writer
-	cmd.Stderr = s.pipe.writer
-	return cmd
-}
-
 // Add a task to execute the command to cron.
 func (c *config) addCmd(s Service, chps chan<- *os.Process) {
 	// Notify you have executed the command
 	if c.execNotice {
-		fmt.Fprintf(s.pipe.writer, "Exec command: %s\n", s.Exec)
+		s.Printf("Exec command: %s\n", s.Exec)
 	}
 	c.cron.AddFunc(s.Every, func() {
 		run(s.prepare(), chps)
@@ -403,11 +366,11 @@ func (c *config) addCmd(s Service, chps chan<- *os.Process) {
 func (c *config) addTask(s Service) {
 	// Notify you have run the callback
 	if c.execNotice {
-		fmt.Fprintf(s.pipe.writer, "Callback: %s\n", s.Tag)
+		s.Printf("Callback: %s\n", s.Tag)
 	}
 
 	c.cron.AddFunc(s.Every, func() {
-		s.Code(c.ctx, s.pipe.writer, s.port)
+		s.Code(c.ctx, s.ctx)
 	})
 }
 
@@ -432,16 +395,4 @@ func (c *config) logging(sc *bufio.Scanner, sid string, clr color) {
 			fmt.Fprintf(c.logger, "%02d:%02d:%02d %-10s | %s\n", hour, min, sec, sid, sc.Text())
 		}
 	}
-}
-
-func (s *Service) isExecute() bool {
-	return s.Code == nil && s.Exec != ""
-}
-
-func (s *Service) isCode() bool {
-	return s.Code != nil
-}
-
-func (s *Service) isCron() bool {
-	return s.Every != ""
 }
