@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 )
 
 // Context struct for golet
 type Context struct {
+	ctx  *signalCtx
 	w    io.Writer
 	port int
 }
@@ -56,4 +58,36 @@ func (c *Context) Print(a ...interface{}) (n int, err error) {
 // It returns the number of bytes written and any write error encountered.
 func (c *Context) Printf(format string, a ...interface{}) (n int, err error) {
 	return fmt.Fprintf(c.w, format, a...)
+}
+
+// Recv send channel when a process receives a signal.
+func (c *Context) Recv() <-chan struct{} {
+	return c.ctx.Recv()
+}
+
+// Signal returns os.Signal and error.
+func (c *Context) Signal() (os.Signal, error) {
+	return c.ctx.Signal()
+}
+
+/* They are methods for context.Context */
+
+// Deadline is implemented for context.Context
+func (c *Context) Deadline() (deadline time.Time, ok bool) {
+	return c.ctx.Deadline()
+}
+
+// Done is implemented for context.Context
+func (c *Context) Done() <-chan struct{} {
+	return c.ctx.Done()
+}
+
+// Err is implemented for context.Context
+func (c *Context) Err() error {
+	return c.ctx.Err()
+}
+
+// Value is implemented for context.Context
+func (c *Context) Value(key interface{}) interface{} {
+	return c.ctx.Value(key)
 }

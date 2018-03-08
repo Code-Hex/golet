@@ -46,7 +46,7 @@ type config struct {
 	wg         sync.WaitGroup
 	once       sync.Once
 	cancel     func()
-	ctx        context.Context
+	ctx        *signalCtx
 	serviceNum int
 	tags       map[string]bool
 	cron       *cron.Cron
@@ -89,7 +89,7 @@ func (c *config) SetInterval(t time.Duration) { c.interval = t }
 // EnableColor can output colored log.
 func (c *config) EnableColor() { c.color = true }
 
-// SetLogger can specify the *os.File
+// SetLogger can specify the io.Writer
 // for example in https://github.com/lestrrat/go-file-rotatelogs
 /*
       logf, _ := rotatelogs.New(
@@ -112,6 +112,8 @@ func (c *config) DisableExecNotice() { c.execNotice = false }
 // New to create struct of golet.
 func New(c context.Context) Runner {
 	ctx, cancel := context.WithCancel(c)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 	return &config{
 		interval:   0,
 		color:      false,
@@ -119,7 +121,10 @@ func New(c context.Context) Runner {
 		logWorker:  true,
 		execNotice: true,
 
-		ctx:    ctx,
+		ctx: &signalCtx{
+			parent:  ctx,
+			sigchan: signals,
+		},
 		cancel: cancel,
 		tags:   map[string]bool{},
 		cron:   cron.New(),
@@ -174,12 +179,8 @@ func (c *config) Run() error {
 	if err := c.assign(&order, services); err != nil {
 		return err
 	}
-
 	chps := make(chan *os.Process, 1)
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
-
-	go c.waitSignals(signals, chps, len(order))
+	go c.waitSignals(chps, len(order))
 
 	// Invoke workers.
 	for _, sid := range order {
@@ -195,6 +196,7 @@ func (c *config) Run() error {
 						service.ctx.Close()
 						c.wg.Done()
 					}()
+				PROCESS:
 					for {
 						// Notify you have executed the command
 						if c.execNotice {
@@ -204,7 +206,20 @@ func (c *config) Run() error {
 						case <-c.ctx.Done():
 							return
 						default:
-							run(service.prepare(), chps)
+							// If golet is recieved signal or exit code is 0, golet do not restart process.
+							if err := run(service.prepare(), chps); err != nil {
+								if exiterr, ok := err.(*exec.ExitError); ok {
+									// The program has exited with an exit code != 0
+									// See https://stackoverflow.com/a/10385867
+									if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+										if !status.Signaled() {
+											continue PROCESS
+										}
+										return
+									}
+								}
+							}
+							return
 						}
 					}
 				}()
@@ -224,6 +239,7 @@ func (c *config) Run() error {
 					}()
 					// If this callback is dead, we should restart it. (like a supervisor)
 					// So, this loop for that.
+				CALLBACK:
 					for {
 						// Notify you have run the callback
 						if c.execNotice {
@@ -233,7 +249,11 @@ func (c *config) Run() error {
 						case <-c.ctx.Done():
 							return
 						default:
-							service.Code(c.ctx, service.ctx)
+							if err := service.Code(service.ctx); err != nil {
+								service.Printf("%s\n", err.Error())
+								continue CALLBACK
+							}
+							return
 						}
 					}
 				}()
@@ -250,7 +270,7 @@ func (c *config) Run() error {
 		}
 	}
 
-	c.wait(chps, signals)
+	c.wait(chps)
 
 	return nil
 }
@@ -270,7 +290,7 @@ func (c *config) assign(order *[]string, services map[string]Service) error {
 		worker := service.Worker
 		for i := 1; i <= worker; i++ {
 			s := service
-			if err := s.createContext(i); err != nil {
+			if err := s.createContext(c.ctx, i); err != nil {
 				return err
 			}
 			sid := fmt.Sprintf("%s.%d", s.Tag, i)
@@ -283,13 +303,13 @@ func (c *config) assign(order *[]string, services map[string]Service) error {
 
 // Receive process ID to be executed. or
 // It traps the signal relate to parent process. sends a signal to the received process ID.
-func (c *config) waitSignals(signals <-chan os.Signal, chps <-chan *os.Process, cap int) {
+func (c *config) waitSignals(chps <-chan *os.Process, cap int) {
 	procs := make([]*os.Process, 0, cap)
 Loop:
 	for {
 		select {
 		case proc := <-chps:
-			// Replace the used process(nil) with the newly generated process.
+			// Replace used process(nil) with the newly generated process.
 			// This run to reduce the memory allocation frequency.
 			for i, p := range procs {
 				if p == nil {
@@ -297,20 +317,17 @@ Loop:
 					continue Loop
 				}
 			}
-			// If not used all processes, allocated newly.
+			// If using all processes, allocate newly.
 			procs = append(procs, proc)
-		case s := <-signals:
-			switch s {
+		case c.ctx.signal = <-c.ctx.sigchan:
+			switch c.ctx.signal {
 			case syscall.SIGTERM, syscall.SIGHUP:
-				c.once.Do(func() {
-					if c.cancel != nil {
-						c.cancel()
-					}
-					time.Sleep(time.Second * 1)
-				})
+				c.ctx.signal = syscall.SIGTERM
 				sendSignal2Procs(syscall.SIGTERM, procs)
+				c.ctx.notifySignal()
 			case syscall.SIGINT:
 				sendSignal2Procs(syscall.SIGINT, procs)
+				c.ctx.notifySignal()
 			}
 		case <-c.ctx.Done():
 			c.cron.Stop()
@@ -359,15 +376,15 @@ func (c *config) addTask(s Service) {
 		s.Printf("Callback: %s\n", s.Tag)
 	}
 	c.cron.AddFunc(s.Every, func() {
-		s.Code(c.ctx, s.ctx)
+		s.Code(s.ctx)
 	})
 }
 
 // Wait services
-func (c *config) wait(chps chan<- *os.Process, sig chan<- os.Signal) {
+func (c *config) wait(chps chan<- *os.Process) {
 	c.cron.Start()
 	c.wg.Wait()
-	signal.Stop(sig)
+	signal.Stop(c.ctx.sigchan)
 }
 
 // Logging

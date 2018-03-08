@@ -6,15 +6,16 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
 // Service struct to add services to golet.
 type Service struct {
 	Exec   string
-	Code   func(context.Context, *Context) // Routine of services.
-	Worker int                             // Number of goroutine. The maximum number of workers is 100.
-	Tag    string                          // Keyword for log.
-	Every  string                          // Crontab like format. See https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format
+	Code   func(context.Context) error // Routine of services.
+	Worker int                         // Number of goroutine. The maximum number of workers is 100.
+	Tag    string                      // Keyword for log.
+	Every  string                      // Crontab like format. See https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format
 
 	color   color
 	reader  *os.File
@@ -22,13 +23,14 @@ type Service struct {
 	tmpPort int
 }
 
-func (s *Service) createContext(i int) error {
+func (s *Service) createContext(ctx *signalCtx, i int) error {
 	in, out, err := os.Pipe()
 	if err != nil {
 		return err
 	}
 	s.reader = in
 	s.ctx = &Context{
+		ctx:  ctx,
 		w:    out,
 		port: s.tmpPort + i,
 	}
@@ -42,6 +44,8 @@ func (s *Service) prepare() *exec.Cmd {
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdout = s.ctx
 	cmd.Stderr = s.ctx
+	cmd.Env = os.Environ()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return cmd
 }
 
