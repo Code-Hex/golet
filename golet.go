@@ -249,7 +249,7 @@ func (c *config) Run() error {
 							return
 						default:
 							if err := service.Code(service.ctx); err != nil {
-								service.Printf("%s\n", err.Error())
+								service.Printf("Callback Error: %s\n", err.Error())
 								continue CALLBACK
 							}
 							return
@@ -375,7 +375,9 @@ func (c *config) addTask(s Service) {
 		s.Printf("Callback: %s\n", s.Tag)
 	}
 	c.cron.AddFunc(s.Every, func() {
-		s.Code(s.ctx)
+		if err := s.Code(s.ctx); err != nil {
+			s.Printf("Callback Error: %s\n", err.Error())
+		}
 	})
 }
 
