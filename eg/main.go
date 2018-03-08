@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Code-Hex/golet"
@@ -34,14 +36,34 @@ func main() {
 	)
 
 	p.Add(golet.Service{
-		Code: func(ctx context.Context, c *golet.Context) {
+		Code: func(ctx context.Context) error {
+			c := ctx.(*golet.Context)
 			c.Println("Hello golet!! Port:", c.Port())
 			mux := http.NewServeMux()
 			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(w, "Hello, World")
+				buf := strings.NewReader("This is log string\nNew line1\nNew line2\nNew line3")
+				c.Copy(buf)
 			})
 			go http.ListenAndServe(c.ServePort(), mux)
-			<-ctx.Done()
+			for {
+				select {
+				// You can notify signal received.
+				case <-c.Recv():
+					signal, err := c.Signal()
+					if err != nil {
+						c.Println(err.Error())
+						return err
+					}
+					switch signal {
+					case syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT:
+						c.Println(signal.String())
+						return nil
+					}
+				case <-ctx.Done():
+					return nil
+				}
+			}
 		},
 		Worker: 3,
 	})
