@@ -45,7 +45,6 @@ type config struct {
 	services   []Service
 	wg         sync.WaitGroup
 	once       sync.Once
-	cancel     func()
 	ctx        *signalCtx
 	serviceNum int
 	tags       map[string]bool
@@ -110,8 +109,7 @@ func (c *config) DisableLogger() { c.logWorker = false }
 func (c *config) DisableExecNotice() { c.execNotice = false }
 
 // New to create struct of golet.
-func New(c context.Context) Runner {
-	ctx, cancel := context.WithCancel(c)
+func New(ctx context.Context) Runner {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 	return &config{
@@ -125,9 +123,8 @@ func New(c context.Context) Runner {
 			parent:  ctx,
 			sigchan: signals,
 		},
-		cancel: cancel,
-		tags:   map[string]bool{},
-		cron:   cron.New(),
+		tags: map[string]bool{},
+		cron: cron.New(),
 	}
 }
 
