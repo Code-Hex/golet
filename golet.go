@@ -330,7 +330,8 @@ Loop:
 		case c.ctx.signal = <-c.ctx.sigchan:
 			switch c.ctx.signal {
 			case syscall.SIGTERM, syscall.SIGHUP:
-				c.ctx.signal = syscall.SIGTERM
+				// Send signals to each process as SIGTERM.
+				// However, In the case of Goroutine, it will notify the received signal. (SIGTERM or SIGHUP)
 				sendSignal2Procs(syscall.SIGTERM, procs)
 				c.ctx.notifySignal()
 			case syscall.SIGINT:
