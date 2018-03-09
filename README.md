@@ -53,7 +53,7 @@ func main() {
             mux := http.NewServeMux()
             mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
                 fmt.Fprintf(w, "Hello, World")
-                buf := strings.NewReader("This is log string\nNew line1\nNew line2\nNew line3")
+                buf := strings.NewReader("This is log string\nNew line1\nNew line2\nNew line3\n")
                 c.Copy(buf)
             })
             go http.ListenAndServe(c.ServePort(), mux)
