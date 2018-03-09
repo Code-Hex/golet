@@ -185,78 +185,11 @@ func (c *config) Run() error {
 	// Invoke workers.
 	for _, sid := range order {
 		service := services[sid]
+		// Run one for each service.
 		if service.isExecute() {
-			// Execute the command with cron or goroutine
-			if service.isCron() {
-				c.addCmd(service, chps)
-			} else {
-				c.wg.Add(1)
-				go func() {
-					defer func() {
-						service.ctx.Close()
-						c.wg.Done()
-					}()
-				PROCESS:
-					for {
-						// Notify you have executed the command
-						if c.execNotice {
-							service.Printf("Exec command: %s\n", service.Exec)
-						}
-						select {
-						case <-c.ctx.Done():
-							return
-						default:
-							// If golet is recieved signal or exit code is 0, golet do not restart process.
-							if err := run(service.prepare(), chps); err != nil {
-								if exiterr, ok := err.(*exec.ExitError); ok {
-									// See https://stackoverflow.com/a/10385867
-									if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-										if !status.Signaled() {
-											continue PROCESS
-										}
-										return
-									}
-								}
-							}
-							return
-						}
-					}
-				}()
-			}
-		}
-
-		if service.isCode() {
-			// Run callback with cron or goroutine
-			if service.isCron() {
-				c.addTask(service)
-			} else {
-				c.wg.Add(1)
-				go func() {
-					defer func() {
-						service.ctx.Close()
-						c.wg.Done()
-					}()
-					// If this callback is dead, we should restart it. (like a supervisor)
-					// So, this loop for that.
-				CALLBACK:
-					for {
-						// Notify you have run the callback
-						if c.execNotice {
-							service.Printf("Callback: %s\n", service.Tag)
-						}
-						select {
-						case <-c.ctx.Done():
-							return
-						default:
-							if err := service.Code(service.ctx); err != nil {
-								service.Printf("Callback Error: %s\n", err.Error())
-								continue CALLBACK
-							}
-							return
-						}
-					}
-				}()
-			}
+			c.executeRun(service, chps)
+		} else if service.isCode() {
+			c.executeCallback(service)
 		}
 		// Enable log worker if logWorker is true.
 		if c.logWorker && (service.Code != nil || service.Exec != "") {
@@ -272,6 +205,82 @@ func (c *config) Run() error {
 	c.wait(chps)
 
 	return nil
+}
+
+// executeRun run command as a process
+func (c *config) executeRun(service Service, chps chan<- *os.Process) {
+	// Execute the command with cron or goroutine
+	if service.isCron() {
+		c.addCmd(service, chps)
+	} else {
+		c.wg.Add(1)
+		go func() {
+			defer func() {
+				service.ctx.Close()
+				c.wg.Done()
+			}()
+		PROCESS:
+			for {
+				// Notify you have executed the command
+				if c.execNotice {
+					service.Printf("Exec command: %s\n", service.Exec)
+				}
+				select {
+				case <-c.ctx.Done():
+					return
+				default:
+					// If golet is received signal or exit code is 0, golet do not restart process.
+					if err := run(service.prepare(), chps); err != nil {
+						if exiterr, ok := err.(*exec.ExitError); ok {
+							// See https://stackoverflow.com/a/10385867
+							if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+								if !status.Signaled() {
+									continue PROCESS
+								}
+								return
+							}
+						}
+					}
+					return
+				}
+			}
+		}()
+	}
+}
+
+// executeCallback run callback as goroutine or cron
+func (c *config) executeCallback(service Service) {
+	// Run callback with cron or goroutine
+	if service.isCron() {
+		c.addTask(service)
+	} else {
+		c.wg.Add(1)
+		go func() {
+			defer func() {
+				service.ctx.Close()
+				c.wg.Done()
+			}()
+			// If this callback is dead, we should restart it. (like a supervisor)
+			// So, this loop for that.
+		CALLBACK:
+			for {
+				// Notify you have run the callback
+				if c.execNotice {
+					service.Printf("Callback: %s\n", service.Tag)
+				}
+				select {
+				case <-c.ctx.Done():
+					return
+				default:
+					if err := service.Code(service.ctx); err != nil {
+						service.Printf("Callback Error: %s\n", err.Error())
+						continue CALLBACK
+					}
+					return
+				}
+			}
+		}()
+	}
 }
 
 // Calculate of the number of workers.
@@ -321,7 +330,8 @@ Loop:
 		case c.ctx.signal = <-c.ctx.sigchan:
 			switch c.ctx.signal {
 			case syscall.SIGTERM, syscall.SIGHUP:
-				c.ctx.signal = syscall.SIGTERM
+				// Send signals to each process as SIGTERM.
+				// However, In the case of Goroutine, it will notify the received signal. (SIGTERM or SIGHUP)
 				sendSignal2Procs(syscall.SIGTERM, procs)
 				c.ctx.notifySignal()
 			case syscall.SIGINT:

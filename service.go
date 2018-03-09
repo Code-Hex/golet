@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 )
 
 // Service struct to add services to golet.
@@ -39,13 +38,12 @@ func (s *Service) createContext(ctx *signalCtx, i int) error {
 
 // Create a command
 func (s *Service) prepare() *exec.Cmd {
-	c := strings.Replace(s.Exec, "$PORT", fmt.Sprintf("%d", s.tmpPort), -1)
+	c := strings.Replace(s.Exec, "$PORT", fmt.Sprintf("%d", s.ctx.Port()), -1)
 	args := append(shell, c)
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdout = s.ctx
 	cmd.Stderr = s.ctx
-	cmd.Env = os.Environ()
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", s.ctx.Port()))
 	return cmd
 }
 
