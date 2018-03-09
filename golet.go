@@ -44,7 +44,6 @@ type config struct {
 
 	services   []Service
 	wg         sync.WaitGroup
-	once       sync.Once
 	ctx        *signalCtx
 	serviceNum int
 	tags       map[string]bool
