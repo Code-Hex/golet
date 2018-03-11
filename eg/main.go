@@ -12,7 +12,13 @@ import (
 )
 
 func main() {
-	p := golet.New(context.Background())
+	cctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-time.After(time.Second * 10)
+		cancel()
+	}()
+
+	p := golet.New(cctx)
 	p.EnableColor()
 	// Execution interval
 	p.SetInterval(time.Second * 1)
@@ -36,37 +42,54 @@ func main() {
 	)
 
 	p.Add(golet.Service{
-		Code: func(ctx context.Context) error {
-			c := ctx.(*golet.Context)
-			c.Println("Hello golet!! Port:", c.Port())
-			mux := http.NewServeMux()
-			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-				fmt.Fprintf(w, "Hello, World")
-				buf := strings.NewReader("This is log string\nNew line1\nNew line2\nNew line3\n")
-				c.Copy(buf)
-			})
-			go http.ListenAndServe(c.ServePort(), mux)
-			for {
-				select {
-				// You can notify signal received.
-				case <-c.Recv():
-					signal, err := c.Signal()
-					if err != nil {
-						c.Println(err.Error())
-						return err
-					}
-					switch signal {
-					case syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT:
-						c.Println(signal.String())
-						return nil
-					}
-				case <-ctx.Done():
-					return nil
-				}
-			}
-		},
+		Code:   serveCode(),
 		Worker: 3,
 	})
 
 	p.Run()
+}
+
+func serveCode() func(context.Context) error {
+	return func(ctx context.Context) error {
+		c := ctx.(*golet.Context)
+		c.Println("Hello golet!! Port:", c.Port())
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, "Hello, World")
+			buf := strings.NewReader("This is log string\nNew line1\nNew line2\nNew line3\n")
+			c.Copy(buf)
+		})
+		panicChan := make(chan interface{}, 1)
+		go func() {
+			defer func() {
+				if p := recover(); p != nil {
+					panicChan <- p
+				}
+			}()
+			if err := http.ListenAndServe(c.ServePort(), mux); err != nil {
+				panic(err)
+			}
+		}()
+		for {
+			select {
+			// You can notify signal received.
+			case <-c.Recv():
+				signal, err := c.Signal()
+				if err != nil {
+					c.Println(err.Error())
+					return err
+				}
+				switch signal {
+				case syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT:
+					c.Println(signal.String())
+					return nil
+				}
+			case <-ctx.Done():
+				c.Println("context cancel")
+				return nil
+			case p := <-panicChan:
+				return fmt.Errorf("%#v", p)
+			}
+		}
+	}
 }
