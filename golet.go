@@ -36,11 +36,12 @@ const (
 // struct comments from http://search.cpan.org/dist/Proclet/lib/Proclet.pm
 // Proclet is a great module!!
 type config struct {
-	interval   time.Duration // interval in seconds between spawning services unless a service exits abnormally.
-	color      bool          // colored log.
-	logger     io.Writer     // sets the output destination file. use stderr by default.
-	logWorker  bool          // enable worker for format logs. If disabled this option, cannot use logger opt too.
-	execNotice bool          // enable start and exec notice message like: `16:38:12 worker.1 | Start callback: worker``.
+	interval     time.Duration  // interval in seconds between spawning services unless a service exits abnormally.
+	color        bool           // colored log.
+	logger       io.Writer      // sets the output destination file. use stderr by default.
+	logWorker    bool           // enable worker for format logs. If disabled this option, cannot use logger opt too.
+	execNotice   bool           // enable start and exec notice message like: `16:38:12 worker.1 | Start callback: worker``.
+	cancelSignal syscall.Signal // sets the syscall.Signal to notify context cancel. If you sets something, you can send that signal to processes when context cancel.
 
 	services   []Service
 	wg         sync.WaitGroup
@@ -75,6 +76,7 @@ type Runner interface {
 	SetLogger(io.Writer)
 	DisableLogger()
 	DisableExecNotice()
+	SetCtxCancelSignal(syscall.Signal)
 	Env(map[string]string) error
 	Add(...Service) error
 	Run() error
@@ -101,22 +103,27 @@ func (c *config) EnableColor() { c.color = true }
 */
 func (c *config) SetLogger(f io.Writer) { c.logger = f }
 
-// DisableLogger is prevent to output log
+// DisableLogger is prevent to output log.
 func (c *config) DisableLogger() { c.logWorker = false }
 
-// DisableExecNotice is disable execute notifications
+// DisableExecNotice is disable execute notifications.
 func (c *config) DisableExecNotice() { c.execNotice = false }
+
+// SetCtxCancelSignal can specify the signal to send processes when context cancel.
+// If you do not set, golet will not send the signal when context cancel.
+func (c *config) SetCtxCancelSignal(signal syscall.Signal) { c.cancelSignal = signal }
 
 // New to create struct of golet.
 func New(ctx context.Context) Runner {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 	return &config{
-		interval:   0,
-		color:      false,
-		logger:     colorable.NewColorableStderr(),
-		logWorker:  true,
-		execNotice: true,
+		interval:     0,
+		color:        false,
+		logger:       colorable.NewColorableStderr(),
+		logWorker:    true,
+		execNotice:   true,
+		cancelSignal: -1, // -1 does not exist. see, https://golang.org/src/syscall/syscall_unix.go?s=3494:3525#L141
 
 		ctx: &signalCtx{
 			parent:  ctx,
@@ -335,7 +342,10 @@ Loop:
 				c.ctx.notifySignal()
 			}
 		case <-c.ctx.Done():
-			c.cron.Stop()
+			if 0 <= c.cancelSignal {
+				sendSignal2Procs(c.cancelSignal, procs)
+				c.ctx.notifySignal()
+			}
 			return
 		}
 	}
@@ -391,6 +401,7 @@ func (c *config) addTask(s Service) {
 func (c *config) wait(chps chan<- *os.Process) {
 	c.cron.Start()
 	c.wg.Wait()
+	c.cron.Stop()
 	signal.Stop(c.ctx.sigchan)
 }
 

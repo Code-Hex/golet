@@ -20,8 +20,12 @@ func main() {
 
 	p := golet.New(cctx)
 	p.EnableColor()
+
 	// Execution interval
 	p.SetInterval(time.Second * 1)
+
+	// Send TERM signal when context cancel
+	p.SetCtxCancelSignal(syscall.SIGTERM)
 
 	p.Env(map[string]string{
 		"NAME":  "codehex",
@@ -39,8 +43,13 @@ func main() {
 			Worker: 2,
 			Tag:    "cron",
 		},
+		golet.Service{
+			Exec: `perl -E 'sleep 2; say "THIS IS DIE PROGRAM"; die;'`,
+			Tag:  "DIE-Perl",
+		},
 	)
 
+	// You can comment out this
 	p.Add(golet.Service{
 		Code:   serveCode(),
 		Worker: 3,
@@ -59,20 +68,26 @@ func serveCode() func(context.Context) error {
 			buf := strings.NewReader("This is log string\nNew line1\nNew line2\nNew line3\n")
 			c.Copy(buf)
 		})
+
 		panicChan := make(chan interface{}, 1)
+		srv := &http.Server{Addr: c.ServePort(), Handler: mux}
+
+		// for ListenAndServe's error
 		go func() {
 			defer func() {
 				if p := recover(); p != nil {
 					panicChan <- p
 				}
 			}()
-			if err := http.ListenAndServe(c.ServePort(), mux); err != nil {
+			if err := srv.ListenAndServe(); err != nil {
 				panic(err)
 			}
 		}()
+
+		// Wait channels
 		for {
 			select {
-			// You can notify signal received.
+			// You can notify signal received
 			case <-c.Recv():
 				signal, err := c.Signal()
 				if err != nil {
@@ -80,15 +95,25 @@ func serveCode() func(context.Context) error {
 					return err
 				}
 				switch signal {
-				case syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT:
+				// If you send TERM or HUP, restart this callback immediately
+				case syscall.SIGTERM, syscall.SIGHUP:
+					c.Println(signal.String())
+					if err := srv.Shutdown(ctx); err != nil {
+						return err
+					}
+					return fmt.Errorf("signal recieved SIGTERM, SIGHUP as error")
+				// End of run
+				case syscall.SIGINT:
 					c.Println(signal.String())
 					return nil
 				}
+			// To catch context cancel
 			case <-ctx.Done():
 				c.Println("context cancel")
-				return nil
+				return srv.Shutdown(ctx)
+			// panic for ListenAndServe
 			case p := <-panicChan:
-				return fmt.Errorf("%#v", p)
+				return p.(error)
 			}
 		}
 	}
