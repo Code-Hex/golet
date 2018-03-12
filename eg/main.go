@@ -20,8 +20,12 @@ func main() {
 
 	p := golet.New(cctx)
 	p.EnableColor()
+
 	// Execution interval
 	p.SetInterval(time.Second * 1)
+
+	// Send TERM signal when context cancel
+	p.SetCtxCancelSignal(syscall.SIGTERM)
 
 	p.Env(map[string]string{
 		"NAME":  "codehex",
@@ -84,9 +88,11 @@ func serveCode() func(context.Context) error {
 					c.Println(signal.String())
 					return nil
 				}
+			// To catch context cancel
 			case <-ctx.Done():
 				c.Println("context cancel")
 				return nil
+			// panic for ListenAndServe
 			case p := <-panicChan:
 				return fmt.Errorf("%#v", p)
 			}
