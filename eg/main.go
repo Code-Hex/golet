@@ -49,6 +49,7 @@ func main() {
 		},
 	)
 
+	// You can comment out this
 	p.Add(golet.Service{
 		Code:   serveCode(),
 		Worker: 3,
@@ -86,7 +87,7 @@ func serveCode() func(context.Context) error {
 		// Wait channels
 		for {
 			select {
-			// You can notify signal received.
+			// You can notify signal received
 			case <-c.Recv():
 				signal, err := c.Signal()
 				if err != nil {
@@ -94,7 +95,7 @@ func serveCode() func(context.Context) error {
 					return err
 				}
 				switch signal {
-				// If you send TERM or HUP, restart this callback immediately.
+				// If you send TERM or HUP, restart this callback immediately
 				case syscall.SIGTERM, syscall.SIGHUP:
 					c.Println(signal.String())
 					if err := srv.Shutdown(ctx); err != nil {
