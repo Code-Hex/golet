@@ -128,6 +128,7 @@ color:      false
 logger:     colorable.NewColorableStderr()
 logWorker:  true
 execNotice: true
+cancelSignal: -1
 ```
 
 By using the [go-colorable](https://github.com/mattn/go-colorable), colored output is also compatible with windows.  
@@ -159,6 +160,10 @@ func (c *config) DisableLogger() { c.logWorker = false }
 
 // DisableExecNotice is disable execute notifications
 func (c *config) DisableExecNotice() { c.execNotice = false }
+
+// SetCtxCancelSignal can specify the signal to send processes when context cancel.
+// If you do not set, golet will not send the signal when context cancel.
+func (c *config) SetCtxCancelSignal(signal syscall.Signal) { c.cancelSignal = signal }
 ```
 
 ## Environment variables

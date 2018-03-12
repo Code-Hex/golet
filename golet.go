@@ -103,13 +103,14 @@ func (c *config) EnableColor() { c.color = true }
 */
 func (c *config) SetLogger(f io.Writer) { c.logger = f }
 
-// DisableLogger is prevent to output log
+// DisableLogger is prevent to output log.
 func (c *config) DisableLogger() { c.logWorker = false }
 
-// DisableExecNotice is disable execute notifications
+// DisableExecNotice is disable execute notifications.
 func (c *config) DisableExecNotice() { c.execNotice = false }
 
 // SetCtxCancelSignal can specify the signal to send processes when context cancel.
+// If you do not set, golet will not send the signal when context cancel.
 func (c *config) SetCtxCancelSignal(signal syscall.Signal) { c.cancelSignal = signal }
 
 // New to create struct of golet.
