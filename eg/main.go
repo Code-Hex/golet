@@ -101,7 +101,7 @@ func serveCode() func(context.Context) error {
 					if err := srv.Shutdown(ctx); err != nil {
 						return err
 					}
-					return fmt.Errorf("signal recieved SIGTERM, SIGHUP as error")
+					return fmt.Errorf("signal received SIGTERM, SIGHUP as error")
 				// End of run
 				case syscall.SIGINT:
 					c.Println(signal.String())
