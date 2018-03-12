@@ -43,6 +43,10 @@ func main() {
 			Worker: 2,
 			Tag:    "cron",
 		},
+		golet.Service{
+			Exec: `perl -E 'sleep 2; say "THIS IS DIE PROGRAM"; die;'`,
+			Tag:  "DIE-Perl",
+		},
 	)
 
 	p.Add(golet.Service{
