@@ -1,9 +1,9 @@
 Golet
 =====
-[![Build Status](https://travis-ci.org/Code-Hex/golet.svg?branch=master)](https://travis-ci.org/Code-Hex/golet) [![GoDoc](https://godoc.org/github.com/Code-Hex/golet?status.svg)](https://godoc.org/github.com/Code-Hex/golet) [![Go Report Card](https://goreportcard.com/badge/github.com/Code-Hex/golet)](https://goreportcard.com/report/github.com/Code-Hex/golet)  
-Golet can manage many services with goroutine from one golang program.  
-It supports go version 1.7 or higher.  
-It is based on the idea of [Proclet](https://metacpan.org/pod/Proclet).  
+[![Build Status](https://travis-ci.org/Code-Hex/golet.svg?branch=master)](https://travis-ci.org/Code-Hex/golet) [![GoDoc](https://godoc.org/github.com/Code-Hex/golet?status.svg)](https://godoc.org/github.com/Code-Hex/golet) [![Go Report Card](https://goreportcard.com/badge/github.com/Code-Hex/golet)](https://goreportcard.com/report/github.com/Code-Hex/golet)
+
+Golet can manage many services with goroutine from one golang program. It's like a supervisor.  
+It supports go version 1.7 or higher. Golet is based on the idea of [Proclet](https://metacpan.org/pod/Proclet).  
 Proclet is a great module in Perl.
 
 # Synopsis
@@ -82,9 +82,12 @@ func main() {
     p.Run()
 }
 ```
-See [eg](https://github.com/Code-Hex/golet/tree/master/eg).
+
+See more [example](https://github.com/Code-Hex/golet/tree/master/eg).
+
 # Logging
-In case to run code of synopsis.
+
+In case to run code of synopsis. I send INT signal to golet.
 ![Logging](https://user-images.githubusercontent.com/6500104/37191403-ac145616-23a2-11e8-9edd-d54175450b84.gif)
 
 # Usage
