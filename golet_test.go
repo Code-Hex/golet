@@ -4,7 +4,6 @@ package golet
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -74,42 +73,6 @@ func TestAdd(t *testing.T) {
 		assert.Equal(t, p1s[i].Tag, p2s[i].Tag)
 		assert.Equal(t, p1s[i].Every, p2s[i].Every)
 		assert.Equal(t, p1s[i].Worker, p2s[i].Worker)
-		assert.Equal(t, p1s[i].color, p2s[i].color)
-	}
-}
-
-func TestAssign(t *testing.T) {
-	st := ServiceGen()
-
-	p := New(ctx)
-	p.Add(st...)
-
-	services := make(map[string]Service)
-
-	// Calculate of the number of workers.
-	cap := 0
-	for _, service := range p.(*config).services {
-		cap += service.Worker
-	}
-
-	order := make([]string, 0, cap)
-
-	// Assignment services.
-	if err := p.(*config).assign(&order, services); err != nil {
-		t.Fatalf(err.Error())
-	}
-
-	assert.Equal(t, cap, len(order))
-
-	x := 0
-	for _, service := range p.(*config).services {
-		worker := service.Worker
-		for i := 1; i <= worker; i++ {
-			s := service
-			sid := fmt.Sprintf("%s.%d", s.Tag, i)
-			assert.Equal(t, sid, order[x])
-			x++
-		}
 	}
 }
 

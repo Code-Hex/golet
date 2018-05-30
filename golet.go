@@ -1,7 +1,6 @@
 package golet
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -47,7 +46,7 @@ type config struct {
 	wg         sync.WaitGroup
 	ctx        *signalCtx
 	serviceNum int
-	tags       map[string]bool
+	tags       map[string]struct{}
 	cron       *cron.Cron
 }
 
@@ -129,7 +128,7 @@ func New(ctx context.Context) Runner {
 			parent:  ctx,
 			sigchan: signals,
 		},
-		tags: map[string]bool{},
+		tags: map[string]struct{}{},
 		cron: cron.New(),
 	}
 }
@@ -157,47 +156,43 @@ func (c *config) Add(services ...Service) error {
 		if _, ok := c.tags[service.Tag]; ok {
 			return errors.New("tag: " + service.Tag + " is already exists")
 		}
-		c.tags[service.Tag] = true
+		c.tags[service.Tag] = struct{}{}
 
 		n, err := port.GetPort()
 		if err != nil {
 			return err
 		}
-
-		service.tmpPort = n
-		service.color = color(c.serviceNum%colornum + 32)
-
-		c.services = append(c.services, service)
+		for i := 0; i < service.Worker; i++ {
+			service.id = fmt.Sprintf("%s.%d", service.Tag, i)
+			service.ctx = &Context{
+				ctx:  c.ctx,
+				port: n + i,
+				logger: &Logger{
+					enable:      c.logWorker,
+					enableColor: c.color,
+					out:         c.logger,
+					sid:         service.id,
+					clr:         color(c.serviceNum%colornum + 32),
+				},
+			}
+			c.services = append(c.services, service)
+		}
 	}
 	return nil
 }
 
 // Run just like the name.
 func (c *config) Run() error {
-	services := make(map[string]Service)
-
-	order := make([]string, 0, c.calcCapacitySize())
-
-	// Assign services.
-	if err := c.assign(&order, services); err != nil {
-		return err
-	}
 	chps := make(chan *os.Process, 1)
-	go c.waitSignals(chps, len(order))
+	go c.waitSignals(chps, len(c.services))
 
 	// Invoke workers.
-	for _, sid := range order {
-		service := services[sid]
+	for _, service := range c.services {
 		// Run one for each service.
 		if service.isExecute() {
 			c.executeRun(service, chps)
 		} else if service.isCode() {
 			c.executeCallback(service)
-		}
-		// Enable log worker if logWorker is true.
-		if c.logWorker && (service.Code != nil || service.Exec != "") {
-			rd := service.reader
-			go c.logging(bufio.NewScanner(rd), sid, service.color)
 		}
 		// When the task is cron, it does not cause wait time.
 		if service.Every == "" {
@@ -218,15 +213,12 @@ func (c *config) executeRun(service Service, chps chan<- *os.Process) {
 	} else {
 		c.wg.Add(1)
 		go func() {
-			defer func() {
-				service.ctx.Close()
-				c.wg.Done()
-			}()
+			defer c.wg.Done()
 		PROCESS:
 			for {
 				// Notify you have executed the command
 				if c.execNotice {
-					service.Printf("Exec command: %s\n", service.Exec)
+					service.ctx.Printf("Exec command: %s\n", service.Exec)
 				}
 				select {
 				case <-c.ctx.Done():
@@ -259,24 +251,21 @@ func (c *config) executeCallback(service Service) {
 	} else {
 		c.wg.Add(1)
 		go func() {
-			defer func() {
-				service.ctx.Close()
-				c.wg.Done()
-			}()
+			defer c.wg.Done()
 			// If this callback is dead, we should restart it. (like a supervisor)
 			// So, this loop for that.
 		CALLBACK:
 			for {
 				// Notify you have run the callback
 				if c.execNotice {
-					service.Printf("Callback: %s\n", service.Tag)
+					service.ctx.Printf("Callback: %s\n", service.Tag)
 				}
 				select {
 				case <-c.ctx.Done():
 					return
 				default:
 					if err := service.Code(service.ctx); err != nil {
-						service.Printf("Callback Error: %s\n", err.Error())
+						service.ctx.Printf("Callback Error: %s\n", err.Error())
 						continue CALLBACK
 					}
 					return
@@ -284,32 +273,6 @@ func (c *config) executeCallback(service Service) {
 			}
 		}()
 	}
-}
-
-// Calculate of the number of workers.
-func (c *config) calcCapacitySize() (cap int) {
-	for _, service := range c.services {
-		cap += service.Worker
-	}
-	return
-}
-
-// Assign the service ID.
-// It also make `order` slice to keep key order of `map[string]Service`.
-func (c *config) assign(order *[]string, services map[string]Service) error {
-	for _, service := range c.services {
-		worker := service.Worker
-		for i := 1; i <= worker; i++ {
-			s := service
-			if err := s.createContext(c.ctx, i); err != nil {
-				return err
-			}
-			sid := fmt.Sprintf("%s.%d", s.Tag, i)
-			services[sid] = s
-			*order = append(*order, sid)
-		}
-	}
-	return nil
 }
 
 // Receive process ID to be executed. or
@@ -377,7 +340,7 @@ func run(c *exec.Cmd, chps chan<- *os.Process) error {
 func (c *config) addCmd(s Service, chps chan<- *os.Process) {
 	// Notify you have executed the command
 	if c.execNotice {
-		s.Printf("Exec command: %s\n", s.Exec)
+		s.ctx.Printf("Exec command: %s\n", s.Exec)
 	}
 	c.cron.AddFunc(s.Every, func() {
 		run(s.prepare(), chps)
@@ -388,11 +351,11 @@ func (c *config) addCmd(s Service, chps chan<- *os.Process) {
 func (c *config) addTask(s Service) {
 	// Notify you have run the callback
 	if c.execNotice {
-		s.Printf("Callback: %s\n", s.Tag)
+		s.ctx.Printf("Callback: %s\n", s.Tag)
 	}
 	c.cron.AddFunc(s.Every, func() {
 		if err := s.Code(s.ctx); err != nil {
-			s.Printf("Callback Error: %s\n", err.Error())
+			s.ctx.Printf("Callback Error: %s\n", err.Error())
 		}
 	})
 }
@@ -403,20 +366,4 @@ func (c *config) wait(chps chan<- *os.Process) {
 	c.wg.Wait()
 	c.cron.Stop()
 	signal.Stop(c.ctx.sigchan)
-}
-
-// Logging
-func (c *config) logging(sc *bufio.Scanner, sid string, clr color) {
-	for sc.Scan() {
-		hour, min, sec := time.Now().Clock()
-		if c.color {
-			fmt.Fprintf(c.logger, "\x1b[%dm%02d:%02d:%02d %-10s |\x1b[0m %s\n",
-				clr,
-				hour, min, sec, sid,
-				sc.Text(),
-			)
-		} else {
-			fmt.Fprintf(c.logger, "%02d:%02d:%02d %-10s | %s\n", hour, min, sec, sid, sc.Text())
-		}
-	}
 }
