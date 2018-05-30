@@ -16,22 +16,16 @@ type Service struct {
 	Tag    string                      // Keyword for log.
 	Every  string                      // Crontab like format. See https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format
 
-	color   color
-	reader  *os.File
-	ctx     *Context // This can be io.Writer. see context.go
-	tmpPort int
+	id     string
+	ctx    *Context // This can be io.Writer. see context.go
+	logger *Logger
 }
 
-func (s *Service) createContext(ctx *signalCtx, i int) error {
-	in, out, err := os.Pipe()
-	if err != nil {
-		return err
-	}
-	s.reader = in
+func (s *Service) createContext(ctx *signalCtx, logger *Logger, port int) error {
 	s.ctx = &Context{
-		ctx:  ctx,
-		w:    out,
-		port: s.tmpPort + i,
+		ctx:    ctx,
+		logger: logger,
+		port:   port,
 	}
 	return nil
 }
@@ -57,10 +51,4 @@ func (s *Service) isCode() bool {
 
 func (s *Service) isCron() bool {
 	return s.Every != ""
-}
-
-// Printf formats according to a format specifier and writes to golet service
-// It returns the number of bytes written and any write error encountered.
-func (s *Service) Printf(format string, a ...interface{}) (n int, err error) {
-	return s.ctx.Printf(format, a...)
 }
