@@ -47,7 +47,7 @@ type config struct {
 	wg         sync.WaitGroup
 	ctx        *signalCtx
 	serviceNum int
-	tags       map[string]bool
+	tags       map[string]struct{}
 	cron       *cron.Cron
 }
 
@@ -129,7 +129,7 @@ func New(ctx context.Context) Runner {
 			parent:  ctx,
 			sigchan: signals,
 		},
-		tags: map[string]bool{},
+		tags: map[string]struct{}{},
 		cron: cron.New(),
 	}
 }
@@ -157,7 +157,7 @@ func (c *config) Add(services ...Service) error {
 		if _, ok := c.tags[service.Tag]; ok {
 			return errors.New("tag: " + service.Tag + " is already exists")
 		}
-		c.tags[service.Tag] = true
+		c.tags[service.Tag] = struct{}{}
 
 		n, err := port.GetPort()
 		if err != nil {
